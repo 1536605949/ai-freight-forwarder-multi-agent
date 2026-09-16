@@ -3,7 +3,7 @@
 # Regenerate after any content change.
 e8478576f0c0461f0fd255fc6b49166c8ae42ee1e776d05724e06bdad8804302  ./.env.example
 fdf4715db235a25ffbda0a23d59f72cdecdb9dac4ac991ea289aa632b36a4db5  ./.gitattributes
-62575de628977dc2964d0b9dc769df090237b410490ee3eb35ce3bf800a9bfe8  ./.github/workflows/ci.yml
+28757a33348f7fa3be325182b77c7093beef3f97ba20505fde5934126a8e2596  ./.github/workflows/ci.yml
 a3d3b5a12db33ea68a4f1ff63e3215af649afb803820a2a934d92c602aead1a6  ./.gitignore
 0a1d0aa6a4fc8469f976c76670d8ca354a8cb3dbddfd8cd6bab520ce9895606a  ./CHANGELOG.md
 f597d9984d6ff8cc16b809f1dcc3282401634182b89799d99236beac98c55c5b  ./Dockerfile
