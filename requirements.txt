@@ -1,0 +1,18 @@
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+sqlalchemy==2.0.43
+pydantic==2.11.7
+pydantic-settings==2.10.1
+httpx==0.28.1
+PyJWT==2.10.1
+prometheus-client==0.22.1
+python-multipart==0.0.20
+tenacity==9.1.2
+email-validator==2.3.0
+psycopg[binary]==3.2.9
+alembic>=1.16,<2
+# NOTE: agent-framework is intentionally NOT pinned here. It conflicts with the fastapi
+# pin above (pip: ResolutionImpossible). It is an *optional* dependency, lazily imported
+# inside app/agents/runtime.py and app/agents/maf_workflows.py, and is required only when
+# AGENT_PROVIDER=maf_openai. Mock mode needs no agent framework at all.
+# To run against a real model:  pip install -r requirements-agent.txt

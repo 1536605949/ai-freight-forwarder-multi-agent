@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>主动获客 Agent 演示 — AI Freight Forwarder</title>
+<style>
+:root{
+  --bg:#F7F6F3; --panel:#FFFFFF; --ink:#1F1E1C; --muted:#6B6A66;
+  --line:#E2E1DD; --line2:#D3D1C7;
+  --amber:#BA7517; --amber-bg:#FAEEDA; --amber-ink:#854F0B;
+  --blue:#185FA5; --blue-bg:#E6F1FB; --blue-ink:#0C447C;
+  --teal:#0F6E56; --teal-bg:#E1F5EE; --teal-ink:#0F6E56;
+  --red:#A32D2D; --red-bg:#FCEBEB;
+  --gray-bg:#F1EFE8;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:28px 24px 64px}
+h1{font-size:20px;font-weight:600;margin:0 0 4px}
+.sub{color:var(--muted);font-size:13px;margin-bottom:24px}
+.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--panel);
+  border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:18px}
+.bar label{font-size:13px;color:var(--muted)}
+input,select{padding:9px 12px;border:1px solid var(--line2);border-radius:8px;
+  font-size:13px;font-family:inherit;background:#fff;color:var(--ink)}
+input.lane{min-width:260px;flex:1}
+button{padding:9px 18px;border-radius:8px;border:1px solid var(--line2);background:#fff;
+  color:var(--ink);font-size:13px;font-family:inherit;cursor:pointer;transition:.15s}
+button:hover:not(:disabled){border-color:var(--ink);background:#FAFAF8}
+button.primary{background:var(--amber);border-color:var(--amber);color:#fff;font-weight:500}
+button.primary:hover:not(:disabled){background:#9E6313}
+button:disabled{opacity:.4;cursor:not-allowed}
+
+/* pipeline rail */
+.rail{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:20px}
+.step{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 10px;text-align:center;
+  position:relative;transition:.25s}
+.step .n{width:24px;height:24px;border-radius:50%;background:var(--gray-bg);color:var(--muted);
+  display:flex;align-items:center;justify-content:center;font-size:12px;margin:0 auto 7px;transition:.25s}
+.step .t{font-size:12.5px;font-weight:500}
+.step .d{font-size:11.5px;color:var(--muted);margin-top:2px}
+.step.active{border-color:var(--amber);background:var(--amber-bg)}
+.step.active .n{background:var(--amber);color:#fff}
+.step.active .t{color:var(--amber-ink)}
+.step.done{border-color:var(--teal)}
+.step.done .n{background:var(--teal);color:#fff}
+.step.done .t{color:var(--teal-ink)}
+
+.grid{display:grid;grid-template-columns:1fr 380px;gap:18px;align-items:start}
+@media(max-width:980px){.grid{grid-template-columns:1fr}.rail{grid-template-columns:repeat(2,1fr)}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-bottom:16px;overflow:hidden}
+.card h2{font-size:14px;font-weight:600;margin:0;padding:14px 16px;border-bottom:1px solid var(--line);
+  display:flex;justify-content:space-between;align-items:center}
+.card h2 .cnt{font-size:12px;color:var(--muted);font-weight:400}
+.card .body{padding:14px 16px}
+.empty{color:var(--muted);font-size:13px;text-align:center;padding:28px 12px}
+
+/* prospect rows */
+.plist{display:flex;flex-direction:column}
+.prow{display:flex;gap:12px;align-items:flex-start;padding:12px 16px;border-bottom:1px solid var(--line);
+  cursor:pointer;transition:.15s}
+.prow:last-child{border-bottom:none}
+.prow:hover{background:#FAFAF8}
+.prow.sel{background:var(--amber-bg)}
+.score{width:42px;height:42px;border-radius:9px;display:flex;align-items:center;justify-content:center;
+  font-size:14px;font-weight:600;flex:0 0 42px}
+.s-hi{background:var(--teal-bg);color:var(--teal-ink)}
+.s-md{background:var(--amber-bg);color:var(--amber-ink)}
+.s-lo{background:var(--gray-bg);color:var(--muted)}
+.pmain{flex:1;min-width:0}
+.pmain .nm{font-weight:500;font-size:13.5px}
+.pmain .meta{font-size:12px;color:var(--muted);margin-top:1px}
+.pmain .rs{font-size:12px;color:var(--muted);margin-top:5px;line-height:1.5}
+.tag{display:inline-block;font-size:11px;padding:1.5px 7px;border-radius:5px;background:var(--gray-bg);
+  color:var(--muted);margin-right:5px}
+
+/* detail panel */
+.kv{display:flex;justify-content:space-between;gap:12px;padding:6px 0;font-size:13px;
+  border-bottom:1px dashed var(--line)}
+.kv:last-child{border-bottom:none}
+.kv .k{color:var(--muted);flex:0 0 92px}
+.kv .v{text-align:right;flex:1;word-break:break-all}
+.draft{background:#FCFBF8;border:1px solid var(--line);border-radius:8px;padding:12px;
+  font-size:12.5px;white-space:pre-wrap;line-height:1.75;max-height:260px;overflow:auto;color:#3A3936}
+.note{font-size:12px;padding:10px 12px;border-radius:8px;line-height:1.6}
+.note.warn{background:var(--red-bg);color:var(--red)}
+.note.ok{background:var(--teal-bg);color:var(--teal-ink)}
+.note.info{background:var(--blue-bg);color:var(--blue-ink)}
+.acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.acts button{flex:1;min-width:120px}
+.gate{font-size:11.5px;color:var(--muted);margin-top:9px;padding-top:9px;border-top:1px solid var(--line)}
+.gate b{color:var(--amber-ink);font-weight:500}
+.log{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;line-height:1.8;
+  max-height:230px;overflow:auto;color:#4A4945}
+.log div{display:flex;gap:8px}
+.log .tm{color:#A8A6A0;flex:0 0 58px}
+.spin{display:inline-block;width:11px;height:11px;border:1.6px solid var(--line2);
+  border-top-color:var(--amber);border-radius:50%;animation:sp .7s linear infinite;vertical-align:-1px;margin-right:6px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.m{background:var(--gray-bg);border-radius:9px;padding:11px 12px;text-align:center}
+.m .lab{font-size:11.5px;color:var(--muted)}
+.m .num{font-size:21px;font-weight:600;margin-top:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>主动获客 Agent — 从找客户到签单的闭环演示</h1>
+  <div class="sub">Agent 自动搜索目标航线客户 → 判断匹配度 → 生成开发信 → 人工放行 → 进入询价报价流程</div>
+
+  <div class="bar">
+    <label>目标航线</label>
+    <input class="lane" id="lane" value="Shanghai -> Los Angeles">
+    <button class="primary" id="btnSearch" onclick="runSearch()">开始搜索客户</button>
+    <button id="btnReset" onclick="reset()">重置</button>
+  </div>
+
+  <div class="rail">
+    <div class="step" id="st1"><div class="n">1</div><div class="t">搜索潜客</div><div class="d">数据源 Adapter</div></div>
+    <div class="step" id="st2"><div class="n">2</div><div class="t">匹配度评估</div><div class="d">Prospecting Agent</div></div>
+    <div class="step" id="st3"><div class="n">3</div><div class="t">客户画像</div><div class="d">Enrichment Agent</div></div>
+    <div class="step" id="st4"><div class="n">4</div><div class="t">开发信草稿</div><div class="d">Outreach Agent</div></div>
+    <div class="step" id="st5"><div class="n">5</div><div class="t">人工放行</div><div class="d">合规门禁</div></div>
+  </div>
+
+  <div class="grid">
+    <div>
+      <div class="card">
+        <h2>潜客列表 <span class="cnt" id="cntProspect">尚未搜索</span></h2>
+        <div class="plist" id="plist"><div class="empty">点击「开始搜索客户」后，Agent 会按目标航线返回潜在货主并给出匹配度排序</div></div>
+      </div>
+      <div class="card">
+        <h2>Agent 执行日志 <span class="cnt" id="cntLog">实时</span></h2>
+        <div class="body"><div class="log" id="log"><div><span class="tm">--:--:--</span><span>等待开始…</span></div></div></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>潜客详情 <span class="cnt" id="cntDetail">未选择</span></h2>
+        <div class="body" id="detail"><div class="empty">从左侧选择一家企业查看画像与开发信</div></div>
+      </div>
+      <div class="card">
+        <h2>业务指标</h2>
+        <div class="body">
+          <div class="metrics">
+            <div class="m"><div class="lab">发现</div><div class="num" id="mDisc">0</div></div>
+            <div class="m"><div class="lab">达标</div><div class="num" id="mQual">0</div></div>
+            <div class="m"><div class="lab">已触达</div><div class="num" id="mSent">0</div></div>
+            <div class="m"><div class="lab">待审批</div><div class="num" id="mPend">0</div></div>
+          </div>
+          <div class="note info" style="margin-top:12px">
+            本演示使用合成潜客数据。生产环境接入持牌贸易数据商，客户来源与合法依据均留痕审计。
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const H={'Content-Type':'application/json','X-Demo-User':'sales001','X-Demo-Tenant':'tenant-demo'};
+let state={prospects:[],sel:null,draft:null,enrich:null};
+
+function ts(){const d=new Date();return d.toTimeString().slice(0,8)}
+function log(msg,cls){
+  const el=document.getElementById('log');
+  const d=document.createElement('div');
+  d.innerHTML=`<span class="tm">${ts()}</span><span${cls?` style="color:${cls}"`:''}>${msg}</span>`;
+  el.appendChild(d); el.scrollTop=el.scrollHeight;
+}
+function setStep(n,st){
+  const el=document.getElementById('st'+n);
+  el.classList.remove('active','done');
+  if(st)el.classList.add(st);
+}
+function reset(){
+  state={prospects:[],sel:null,draft:null,enrich:null};
+  document.getElementById('plist').innerHTML='<div class="empty">点击「开始搜索客户」后，Agent 会按目标航线返回潜在货主并给出匹配度排序</div>';
+  document.getElementById('detail').innerHTML='<div class="empty">从左侧选择一家企业查看画像与开发信</div>';
+  document.getElementById('log').innerHTML='<div><span class="tm">--:--:--</span><span>等待开始…</span></div>';
+  document.getElementById('cntProspect').textContent='尚未搜索';
+  document.getElementById('cntDetail').textContent='未选择';
+  ['mDisc','mQual','mSent','mPend'].forEach(id=>document.getElementById(id).textContent='0');
+  for(let i=1;i<=5;i++)setStep(i,null);
+}
+function scoreClass(s){return s>=75?'s-hi':(s>=55?'s-md':'s-lo')}
+
+async function runSearch(){
+  const btn=document.getElementById('btnSearch');
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span>搜索中';
+  reset();
+  const lane=document.getElementById('lane').value.trim();
+  setStep(1,'active'); log('调用潜客数据源，航线：'+lane);
+  try{
+    const t0=performance.now();
+    const r=await fetch('/api/v1/prospecting/search',{method:'POST',headers:H,
+      body:JSON.stringify({lane:lane,limit:14})});
+    const j=await r.json();
+    const ms=Math.round(performance.now()-t0);
+    if(!r.ok){throw new Error(j.detail||('HTTP '+r.status))}
+    setStep(1,'done');
+    log(`数据源返回 ${j.discovered} 家企业（${ms}ms）`);
+    setStep(2,'active'); log('Prospecting Agent 评估航线匹配度…');
+    await sleep(380);
+    setStep(2,'done');
+    const list=j.prospects||[];
+    log(`匹配度评估完成，${list.length} 家进入候选池`);
+    state.prospects=list;
+    document.getElementById('mDisc').textContent=j.discovered;
+    document.getElementById('mQual').textContent=list.length;
+    document.getElementById('cntProspect').textContent=`${list.length} 家候选 / 共发现 ${j.discovered} 家`;
+    renderList();
+    setStep(3,null); log('可从左侧选择企业继续做客户画像','#0F6E56');
+  }catch(e){
+    log('搜索失败：'+e.message,'#A32D2D');
+  }finally{
+    btn.disabled=false; btn.textContent='开始搜索客户';
+  }
+}
+function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
+
+function renderList(){
+  const el=document.getElementById('plist');
+  if(!state.prospects.length){el.innerHTML='<div class="empty">没有达标客户</div>';return}
+  el.innerHTML=state.prospects.map((p,i)=>{
+    const s=Math.round(p.score||0);
+    return `<div class="prow${state.sel===p.id?' sel':''}" onclick="select('${p.id}')">
+      <div class="score ${scoreClass(s)}">${s}</div>
+      <div class="pmain">
+        <div class="nm">${esc(p.company)}</div>
+        <div class="meta">${esc(p.country||'—')} · ${esc(p.industry||'未标注行业')}</div>
+        <div class="rs">${esc((p.score_rationale||'').slice(0,96))}${(p.score_rationale||'').length>96?'…':''}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+
+async function select(id){
+  state.sel=id; state.draft=null; state.enrich=null;
+  const p=state.prospects.find(x=>x.id===id); if(!p)return;
+  renderList();
+  document.getElementById('cntDetail').textContent=p.company;
+  const el=document.getElementById('detail');
+  el.innerHTML=`<div class="kv"><span class="k">企业</span><span class="v">${esc(p.company)}</span></div>
+    <div class="kv"><span class="k">国家</span><span class="v">${esc(p.country||'—')}</span></div>
+    <div class="kv"><span class="k">行业</span><span class="v">${esc(p.industry||'—')}</span></div>
+    <div class="kv"><span class="k">预估货量</span><span class="v">${p.est_volume_teu?Math.round(p.est_volume_teu)+' TEU/年':'未知'}</span></div>
+    <div class="kv"><span class="k">数据来源</span><span class="v">${esc(p.data_origin||p.source||'—')}</span></div>
+    <div class="kv"><span class="k">匹配度</span><span class="v"><b>${Math.round(p.score||0)}</b> / 100</span></div>
+    <div class="acts"><button class="primary" onclick="enrich()">生成客户画像</button></div>
+    <div class="gate">下一步将调用 <b>Enrichment Agent</b> 推断决策人角色与触达就绪度。模型只能基于已有信息推断，不得编造人名与邮箱。</div>`;
+  setStep(3,'active'); log(`选择 <${p.company}>，开始客户画像`);
+}
+
+async function enrich(){
+  if(!state.sel)return;
+  const p=state.prospects.find(x=>x.id===state.sel);
+  const el=document.getElementById('detail');
+  const btns=el.querySelectorAll('button'); btns.forEach(b=>b.disabled=true);
+  try{
+    const r=await fetch(`/api/v1/prospects/${state.sel}/enrich`,{method:'POST',headers:H,body:'{}'});
+    const j=await r.json();
+    if(!r.ok)throw new Error(j.detail||('HTTP '+r.status));
+    setStep(3,'done');
+    const e=j.enrichment||{};
+    state.enrich=e;
+    log(`画像完成，触达就绪度：${e.outreach_readiness||'unknown'}`);
+    el.innerHTML=`<div class="kv"><span class="k">企业</span><span class="v">${esc(p.company)}</span></div>
+      <div class="kv"><span class="k">决策人角色</span><span class="v">${esc(e.decision_maker_role||'—')}</span></div>
+      <div class="kv"><span class="k">触达就绪度</span><span class="v"><b>${esc(e.outreach_readiness||'—')}</b></span></div>
+      <div class="kv"><span class="k">画像</span><span class="v" style="text-align:left">${esc(e.company_profile||'—')}</span></div>
+      <div class="kv"><span class="k">潜在需求</span><span class="v" style="text-align:left">${esc(e.likely_needs||'—')}</span></div>
+      ${(e.missing_info&&e.missing_info.length)?`<div class="kv"><span class="k">待补信息</span><span class="v">${e.missing_info.map(esc).join('、')}</span></div>`:''}
+      <div class="acts"><button class="primary" onclick="draft()">生成开发信</button></div>
+      <div class="gate">客户数据仍停留在 <b>候选池</b>，尚未进入 CRM。只有经过人工确认合规依据后才会转为正式 Lead。</div>`;
+  }catch(err){
+    log('画像失败：'+err.message,'#A32D2D'); btns.forEach(b=>b.disabled=false);
+  }
+}
+
+async function draft(){
+  if(!state.sel)return;
+  const el=document.getElementById('detail');
+  el.querySelectorAll('button').forEach(b=>b.disabled=true);
+  setStep(4,'active'); log('Outreach Agent 撰写开发信…');
+  try{
+    // Prospects from a fresh search have no email yet; the draft gate reports this honestly.
+    const r=await fetch(`/api/v1/prospects/${state.sel}/outreach-draft`,{method:'POST',headers:H,body:'{}'});
+    const j=await r.json();
+    if(!r.ok){
+      setStep(4,null);
+      log('开发信未生成：'+shortErr(j.detail),'#A32D2D');
+      el.insertAdjacentHTML('beforeend',`<div class="note warn" style="margin-top:12px">
+        该候选企业当前<b>没有可用的联系邮箱</b>，无法生成外发草稿。<br>
+        这正是设计意图：没有可核实的联系方式时，系统不会凭模型猜测生成收件人。</div>
+        <div class="acts"><button onclick="select('${state.sel}')">返回</button></div>`);
+      return;
+    }
+    setStep(4,'done');
+    state.draft=j;
+    log('开发信草稿已生成，等待人工放行');
+    el.insertAdjacentHTML('beforeend',`<div style="margin-top:14px">
+      <div class="kv"><span class="k">主题</span><span class="v" style="text-align:left">${esc(j.subject||'')}</span></div>
+      <div style="margin-top:8px"><div class="draft">${esc(j.body||'')}</div></div>
+      <div class="acts">
+        <button class="primary" onclick="review('approve')">批准并发送</button>
+        <button onclick="review('reject')">驳回</button>
+      </div>
+      <div class="gate">
+        发送前需通过 <b>三道代码级门禁</b>：① 已记录人工批准 ② 存在合法处理依据 ③ 未超过触达频率上限。
+        任一不满足都会被后端拒绝，提示词无法绕过。
+      </div></div>`);
+  }catch(err){
+    log('生成失败：'+err.message,'#A32D2D'); setStep(4,null);
+  }
+}
+function shortErr(d){
+  if(!d)return '未知错误';
+  if(typeof d==='string')return d;
+  return Array.isArray(d)?d.map(x=>x.msg||JSON.stringify(x)).join('; '):JSON.stringify(d);
+}
+
+async function review(action){
+  if(!state.draft)return;
+  const el=document.getElementById('detail');
+  el.querySelectorAll('button').forEach(b=>b.disabled=true);
+  try{
+    const r1=await fetch(`/api/v1/outreach/${state.draft.id}/review`,{method:'POST',headers:H,
+      body:JSON.stringify({action:action,comment:'演示审批'})});
+    if(!r1.ok)throw new Error(shortErr((await r1.json()).detail));
+    setStep(5,'active');
+    if(action==='reject'){
+      log('人工驳回，流程终止','#A32D2D'); setStep(5,'done');
+      el.insertAdjacentHTML('beforeend','<div class="note warn" style="margin-top:12px">已驳回，不会发送。</div>'); return;
+    }
+    log('人工批准通过，执行发送…');
+    const r2=await fetch(`/api/v1/outreach/${state.draft.id}/send`,{method:'POST',headers:H});
+    const j2=await r2.json();
+    if(!r2.ok){
+      setStep(5,null);
+      log('发送被合规门禁拦截：'+shortErr(j2.detail),'#A32D2D');
+      el.insertAdjacentHTML('beforeend',`<div class="note warn" style="margin-top:12px">
+        发送被拦截：<b>${esc(shortErr(j2.detail))}</b><br>
+        该候选企业缺少已确认的合法处理依据。人工审批<b>不足以</b>放行冷启动外发——
+        还必须在转化为正式 Lead 时明确记录合规基础。</div>`);
+      return;
+    }
+    setStep(5,'done');
+    document.getElementById('mSent').textContent=Number(document.getElementById('mSent').textContent)+1;
+    log('已发送，进入跟进队列','#0F6E56');
+    el.insertAdjacentHTML('beforeend',`<div class="note ok" style="margin-top:12px">
+      邮件已通过三道门禁并发出，已写入触达记录用于频率控制与合规审计。</div>`);
+  }catch(e){
+    log('操作失败：'+e.message,'#A32D2D');
+  }
+}
+</script>
+</body>
+</html>

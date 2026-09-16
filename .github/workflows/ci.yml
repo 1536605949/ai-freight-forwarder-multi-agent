@@ -1,0 +1,33 @@
+name: ci
+on: [push, pull_request]
+jobs:
+ test:
+  runs-on: ubuntu-latest
+  steps:
+   - uses: actions/checkout@v4
+   - uses: actions/setup-python@v5
+     with: {python-version: '3.12'}
+   - run: pip install -r requirements-dev.txt
+
+   # Lint is a gate, not a suggestion. The rule set is declared in pyproject.toml, so this
+   # passes on a clean tree and fails on a real defect.
+   - name: lint
+     run: ruff check app tests worker evaluation scripts
+
+   # Unit + integration suite. Includes the migration drift test (upgrade head == ORM
+   # metadata), the state-machine invariant tests, and the eval-harness mutation tests.
+   - name: tests
+     run: pytest -q
+
+   # Proves the packaging invariant: `agent-framework` must stay out of requirements.txt,
+   # or the Docker build and every plain install break.
+   - name: packaging invariants
+     run: python scripts/verify_package.py
+
+   # The initial migration must actually build a working schema, not just parse.
+   - name: migrations
+     run: alembic upgrade head
+
+   # The app must import and boot with the default (mock) configuration and no credentials.
+   - name: smoke boot
+     run: python -c "from app.main import app; print(len(app.routes), 'routes')"

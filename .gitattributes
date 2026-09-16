@@ -1,0 +1,20 @@
+# Normalise line endings so a Windows checkout and a Linux CI runner agree.
+# Without this, `git add` on Windows rewrites every file and the diff noise hides real changes.
+* text=auto eol=lf
+
+# Shell scripts must keep LF even on Windows, or they fail with "bad interpreter: ^M".
+*.sh text eol=lf
+
+# Windows-only helpers, if any are ever added.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets -- never touch these.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.xlsx binary
+*.db binary

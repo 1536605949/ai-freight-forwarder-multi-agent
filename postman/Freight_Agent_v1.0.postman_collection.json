@@ -1,0 +1,63 @@
+{
+  "info": {
+    "name": "AI Freight Forwarder Multi-Agent v1.0",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base",
+      "value": "http://localhost:8100"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "url": "{{base}}/api/healthz"
+      }
+    },
+    {
+      "name": "Inbound Inquiry",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Demo-User",
+            "value": "sales001"
+          },
+          {
+            "key": "X-Demo-Tenant",
+            "value": "tenant-demo"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"external_message_id\": \"postman-1\", \"sender_email\": \"buyer@example.com\", \"subject\": \"quote\", \"body\": \"Need 2x40HQ from Shanghai to Los Angeles\"}"
+        },
+        "url": "{{base}}/api/v1/messages/inbound"
+      }
+    },
+    {
+      "name": "Dashboard",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Demo-User",
+            "value": "sales001"
+          },
+          {
+            "key": "X-Demo-Tenant",
+            "value": "tenant-demo"
+          }
+        ],
+        "url": "{{base}}/api/v1/dashboard"
+      }
+    }
+  ]
+}

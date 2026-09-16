@@ -1,0 +1,111 @@
+Project 2 — 实际运行顺序
+==========================
+
+★ 最快路径（推荐）：一条命令
+----------------------------
+    python scripts/bootstrap_dev.py
+
+它会自动完成：检查 Python 版本 → 建 .venv → 装依赖 → 建库建表 → 种子数据 → 打印启动命令。
+幂等：重复执行不会破坏已有环境。常用参数：
+
+    python scripts/bootstrap_dev.py --check          # 只体检，不改任何东西
+    python scripts/bootstrap_dev.py --skip-install   # venv 已有依赖，跳过联网装包
+    python scripts/bootstrap_dev.py --reset-db       # 清空本地演示数据重建（会删数据）
+    python scripts/bootstrap_dev.py --json           # 输出机器可读结果，给 CI 用
+
+然后：
+    uvicorn app.main:app --reload --port 8100
+    python -m worker.scheduler        # 另开一个终端，可选
+
+打开：
+    主动获客 Demo      http://localhost:8100/demo/prospecting.html
+    全流程总览 Demo    http://localhost:8100/demo/overview.html
+    API 文档           http://localhost:8100/docs
+
+Makefile 等价入口：make bootstrap / make run / make test / make acceptance
+
+
+★ 验证清单（服务启动后，另开终端）
+----------------------------------
+    pytest -q                                        # 179 passed
+    ruff check app tests worker evaluation scripts   # All checks passed
+    python evaluation/run_eval.py                    # 6/6，全部真实执行
+    python scripts/delivery_check.py                 # 40/40
+    python -m alembic upgrade head                   # 迁移可用
+
+评测脚本的设计要点：**没执行的用例不算通过**。退出码 1 的条件是
+「critical 用例失败」或「critical 用例从未执行」。未知 kind/rule 一律 FAIL。
+tests/test_eval_harness.py 用变异测试证明它真的会失败——不能失败的评测脚本
+比没有评测脚本更危险。
+
+
+A. 本地业务闭环（无需 LLM Key）—— 手工步骤
+--------------------------
+1. pip install -r requirements-dev.txt
+2. export DATABASE_URL=sqlite:///./data/freight.db
+3. export AUTH_MODE=dev
+4. export AGENT_PROVIDER=mock
+5. python scripts/seed_demo.py
+6. uvicorn app.main:app --port 8100
+7. python scripts/demo_scenario.py
+8. python scripts/acceptance.py
+9. python scripts/release_gate.py
+
+B. Docker 全栈
+--------------
+1. 生成 deployment/.env：
+   - 仓库根 .env.example 是应用配置的完整真相来源（45 项，有测试守住与 config.py 同步）
+   - deployment/.env.example 只是 compose 覆盖层（POSTGRES_*/GRAFANA_* + 网络内差异项）
+   两者合并写入 deployment/.env（compose 通过 env_file 读取）。
+2. 修改 JWT/DB/API Secret
+3. docker compose --env-file deployment/.env -f deployment/docker-compose.yml up -d --build
+4. Demo: http://localhost:8088/demo/
+5. API: http://localhost:8088/api/healthz
+6. MailHog: http://localhost:8025
+7. Prometheus: http://localhost:9091
+8. Grafana: http://localhost:3001
+
+C. Microsoft Agent Framework（可选，需 Key）
+--------------------------------------------
+0. pip install -r requirements-agent.txt      # agent-framework 是可选依赖，默认不装
+1. 把 AGENT_PROVIDER 改为 maf_openai
+2. 设置 OPENAI_API_KEY / OPENAI_CHAT_MODEL，或改 runtime 接 Foundry
+3. 先运行 pytest 与 scripts/acceptance.py
+4. 再接真实邮件、Carrier/DCSA Schedule、Rate、Booking、Track&Trace
+
+   说明：agent-framework 与 fastapi 的固定版本存在依赖冲突（pip ResolutionImpossible），
+   因此它被隔离到 requirements-agent.txt，不进 requirements.txt。
+   Mock 模式完全不依赖它，Docker 构建也只装 requirements.txt。
+
+D. 推荐接真实系统顺序
+---------------------
+1. 邮箱 OAuth/SMTP + inbound webhook
+2. CRM（HubSpot/Salesforce/自建）
+3. Commercial Schedules/DCSA-compatible Carrier APIs
+4. 合约价/历史 Rate 数据
+5. Supplier RFQ 邮箱
+6. Booking Provider
+7. Track & Trace
+8. Lead source / marketing attribution
+9. 潜客数据源（持牌商业数据商，含海关提单）
+10. AIS 船舶位置（持牌付费数据）
+
+E. 上线门槛
+-----------
+自动化可验证（CI 已强制）：
+- pytest 全绿（179 passed）
+- ruff check 全仓零告警
+- critical eval：0 失败 **且 0 未执行**（"未执行"不算通过）
+- cross-tenant isolation PASS
+- 未审批报价无法发送 PASS（服务层门禁 + 状态机双层）
+- 未审批冷启动触达无法发送 PASS（合规门禁）
+- 重复 webhook 幂等 PASS
+- alembic upgrade head 与 ORM schema 一致（漂移测试）
+- 空库升级后 schema 可复现（升降级往返指纹一致）
+
+仍需人工确认（不在 CI 覆盖范围）：
+- secrets 不在 Git 中（.gitignore 已覆盖 .env/*.db/.venv，需人工复核提交历史）
+- real Provider sandbox 验证完成
+- RFQ timeout / partial quote 可恢复 —— **当前未实现**，见 docs/ARCHITECTURE_REVIEW.md 第十节
+- Worker 并发锁（多副本部署前必须补）—— **当前未实现**
+- release_gate PASS

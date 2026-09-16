@@ -1,0 +1,8 @@
+-r requirements.txt
+pytest==8.4.2
+pytest-asyncio==1.1.0
+pytest-cov==7.1.0
+requests==2.32.5
+ruff==0.12.11
+# Production LLM orchestration (install when using AGENT_PROVIDER=maf_openai):
+# agent-framework>=1.17,<2

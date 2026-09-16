@@ -1,0 +1,10 @@
+from prometheus_client import Counter, Histogram
+REQUESTS=Counter('freight_requests_total','HTTP requests',['method','path','status'])
+AGENT_RUNS=Counter('freight_agent_runs_total','Agent runs',['agent','status'])
+AGENT_LATENCY=Histogram('freight_agent_latency_seconds','Agent latency',['agent'])
+RFQ_SENT=Counter('freight_rfq_sent_total','RFQ supplier messages sent')
+QUOTES_APPROVED=Counter('freight_quotes_approved_total','Approved customer quotes')
+PROSPECTS_DISCOVERED=Counter('freight_prospects_discovered_total','Prospect candidates returned by sources')
+OUTREACH_SENT=Counter('freight_outreach_sent_total','Cold outreach messages sent')
+OUTREACH_BLOCKED=Counter('freight_outreach_blocked_total','Cold outreach blocked by a compliance gate',['reason'])
+VESSEL_DELAY_ALERTS=Counter('freight_vessel_delay_alerts_total','Vessel delay alerts by outcome',['outcome'])

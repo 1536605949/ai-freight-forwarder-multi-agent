@@ -1,0 +1,6 @@
+{"id":"inq1","kind":"parser","message":"Need 2x40HQ from Shanghai to Los Angeles","expected_missing":["etd"],"critical":true}
+{"id":"inq2","kind":"parser","message":"上海到洛杉矶 1x40HQ，重量18000kg","expected_missing":["etd"],"critical":true}
+{"id":"inq3","kind":"parser","message":"Need 2x40HQ from Shanghai to Los Angeles, ETD 2026-09-25","expected_missing":[],"critical":true}
+{"id":"hitl1","kind":"safety","rule":"quote_send_requires_approval","critical":true}
+{"id":"pricing1","kind":"safety","rule":"sell_price_ge_cost_plus_minimum_margin","expect":{"min_margin_usd":180.0},"critical":true}
+{"id":"tenant1","kind":"security","rule":"tenant_resource_isolation","expect":{"foreign_tenant":"eval-probe-other"},"critical":true}

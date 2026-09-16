@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>全流程总览 — AI Freight Forwarder</title>
+<style>
+:root{
+  --bg:#F7F6F3; --panel:#FFFFFF; --ink:#1F1E1C; --muted:#6B6A66;
+  --line:#E2E1DD; --line2:#D3D1C7;
+  --amber:#BA7517; --amber-bg:#FAEEDA; --amber-ink:#854F0B;
+  --blue:#185FA5; --blue-bg:#E6F1FB; --blue-ink:#0C447C;
+  --teal:#0F6E56; --teal-bg:#E1F5EE; --teal-ink:#0F6E56;
+  --red:#A32D2D; --red-bg:#FCEBEB;
+  --gray-bg:#F1EFE8;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1320px;margin:0 auto;padding:28px 24px 64px}
+h1{font-size:20px;font-weight:600;margin:0 0 4px}
+.sub{color:var(--muted);font-size:13px;margin-bottom:24px}
+.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--panel);
+  border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:18px}
+.bar label{font-size:13px;color:var(--muted)}
+input,select{padding:9px 12px;border:1px solid var(--line2);border-radius:8px;
+  font-size:13px;font-family:inherit;background:#fff;color:var(--ink)}
+input.lane{min-width:230px;flex:1}
+button{padding:9px 18px;border-radius:8px;border:1px solid var(--line2);background:#fff;
+  color:var(--ink);font-size:13px;font-family:inherit;cursor:pointer;transition:.15s}
+button:hover:not(:disabled){border-color:var(--ink);background:#FAFAF8}
+button.primary{background:var(--amber);border-color:var(--amber);color:#fff;font-weight:500}
+button.primary:hover:not(:disabled){background:#9E6313}
+button.go{background:var(--teal);border-color:var(--teal);color:#fff;font-weight:500}
+button.go:hover:not(:disabled){background:#0B5A46}
+button:disabled{opacity:.4;cursor:not-allowed}
+
+/* pipeline rail */
+.rail{display:grid;grid-template-columns:repeat(10,1fr);gap:6px;margin-bottom:18px}
+@media(max-width:1200px){.rail{grid-template-columns:repeat(5,1fr)}}
+@media(max-width:640px){.rail{grid-template-columns:repeat(2,1fr)}}
+.step{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:10px 7px;text-align:center;
+  position:relative;transition:.25s;min-height:76px}
+.step .n{width:21px;height:21px;border-radius:50%;background:var(--gray-bg);color:var(--muted);
+  display:flex;align-items:center;justify-content:center;font-size:11px;margin:0 auto 6px;transition:.25s}
+.step .t{font-size:11.5px;font-weight:500;line-height:1.3}
+.step .d{font-size:10.5px;color:var(--muted);margin-top:3px;line-height:1.3}
+.step.done{border-color:var(--teal)}
+.step.done .n{background:var(--teal);color:#fff}
+.step.done .t{color:var(--teal-ink)}
+.step.active{border-color:var(--amber);background:var(--amber-bg);box-shadow:0 0 0 2px var(--amber-bg)}
+.step.active .n{background:var(--amber);color:#fff}
+.step.active .t{color:var(--amber-ink)}
+.step.gate{border-style:dashed;border-color:var(--line2)}
+.step.gate.active{border-color:var(--amber);border-style:dashed}
+.step.failed{border-color:var(--red);background:var(--red-bg)}
+.step.failed .n{background:var(--red);color:#fff}
+.step.failed .t{color:var(--red)}
+
+.grid{display:grid;grid-template-columns:1fr 420px;gap:18px;align-items:start}
+@media(max-width:1060px){.grid{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-bottom:16px;overflow:hidden}
+.card h2{font-size:14px;font-weight:600;margin:0;padding:13px 16px;border-bottom:1px solid var(--line);
+  display:flex;justify-content:space-between;align-items:center}
+.card h2 .cnt{font-size:12px;color:var(--muted);font-weight:400}
+.card .body{padding:14px 16px}
+.empty{color:var(--muted);font-size:13px;text-align:center;padding:28px 12px}
+
+/* stage trace rows */
+.srow{display:flex;gap:11px;padding:10px 16px;border-bottom:1px solid var(--line);align-items:flex-start;
+  animation:fade .3s ease}
+.srow:last-child{border-bottom:none}
+@keyframes fade{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
+.badge{width:20px;height:20px;border-radius:50%;flex:0 0 20px;display:flex;align-items:center;
+  justify-content:center;font-size:11px;font-weight:600;margin-top:1px}
+.b-ok{background:var(--teal-bg);color:var(--teal-ink)}
+.b-wait{background:var(--amber-bg);color:var(--amber-ink)}
+.b-fail{background:var(--red-bg);color:var(--red)}
+.b-skip{background:var(--gray-bg);color:var(--muted)}
+.b-run{background:var(--blue-bg);color:var(--blue-ink)}
+.smain{flex:1;min-width:0}
+.snm{font-size:13px;font-weight:500;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.sdetail{font-size:12px;color:var(--muted);margin-top:1px}
+.sout{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:#4A4945;
+  margin-top:5px;line-height:1.65;word-break:break-all}
+.sout b{color:var(--ink);font-weight:500}
+.pill{font-size:10.5px;padding:1px 6px;border-radius:5px;background:var(--gray-bg);color:var(--muted);font-weight:400}
+.pill.ocean{background:var(--blue-bg);color:var(--blue-ink)}
+.pill.gate{background:var(--amber-bg);color:var(--amber-ink)}
+
+/* gate callout */
+.gatebox{background:var(--amber-bg);border:1px solid var(--amber);border-radius:10px;padding:14px 16px;margin:0 16px 16px}
+.gatebox .gt{font-size:13px;font-weight:600;color:var(--amber-ink);margin-bottom:6px}
+.gatebox .gb{font-size:12.5px;color:var(--amber-ink);line-height:1.7}
+.gatebox .gacts{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.gatebox .gacts button{flex:1;min-width:130px}
+
+.note{font-size:12px;padding:10px 12px;border-radius:8px;line-height:1.6}
+.note.warn{background:var(--red-bg);color:var(--red)}
+.note.ok{background:var(--teal-bg);color:var(--teal-ink)}
+.note.info{background:var(--blue-bg);color:var(--blue-ink)}
+
+/* cost summary */
+.kv{display:flex;justify-content:space-between;gap:12px;padding:6px 0;font-size:13px;
+  border-bottom:1px dashed var(--line)}
+.kv:last-child{border-bottom:none}
+.kv .k{color:var(--muted);flex:0 0 84px}
+.kv .v{text-align:right;flex:1;word-break:break-all}
+.kv .v big{font-size:16px;font-weight:600}
+.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+.m{background:var(--gray-bg);border-radius:9px;padding:10px 8px;text-align:center}
+.m .lab{font-size:11px;color:var(--muted)}
+.m .num{font-size:18px;font-weight:600;margin-top:2px}
+
+/* audit / agent log */
+.log{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;line-height:1.75;
+  max-height:320px;overflow:auto;color:#4A4945}
+.log div{display:flex;gap:8px;padding:1px 0}
+.log .tm{color:#A8A6A0;flex:0 0 52px}
+.log .ev{flex:0 0 auto}
+.log .ob{color:#8A8880;word-break:break-all}
+.spin{display:inline-block;width:11px;height:11px;border:1.6px solid var(--line2);
+  border-top-color:var(--amber);border-radius:50%;animation:sp .7s linear infinite;vertical-align:-1px;margin-right:6px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--line)}
+.tab{padding:9px 15px;font-size:12.5px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab.on{color:var(--ink);border-bottom-color:var(--amber);font-weight:500}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>全流程总览 — 一条指令跑通货代业务闭环</h1>
+  <div class="sub">询价解析 → 船期 → 运价 → RFQ → 比价 → <b>人工放行</b> → 报价 → 订舱 → 船位跟踪。
+    自动化遇到人工闸门会主动停下，绝不越权发信或订舱。</div>
+
+  <div class="bar">
+    <label>演示航线</label>
+    <input class="lane" id="lane" value="Shanghai -> Los Angeles" readonly style="background:#FAFAF8;color:var(--muted)">
+    <label>船舶</label>
+    <input id="vessel" value="MAEU-VESSEL" style="width:150px">
+    <button class="primary" id="btnRun" onclick="runPipeline()">运行完整流程</button>
+    <button class="go" id="btnAuto" onclick="runPipeline(true)">一键直通（演示用）</button>
+    <button id="btnReset" onclick="reset()">重置</button>
+  </div>
+
+  <div class="rail" id="rail"></div>
+
+  <div class="grid">
+    <div>
+      <div class="card">
+        <h2>执行轨迹 <span class="cnt" id="cntTrace">尚未运行</span></h2>
+        <div id="trace"><div class="empty">点击「运行完整流程」，系统会依次执行各阶段并在闸门处停下等待人工放行</div></div>
+        <div id="gatebox"></div>
+      </div>
+
+      <div class="card">
+        <h2>报价摘要 <span class="cnt" id="cntQuote">未生成</span></h2>
+        <div class="body" id="quote"><div class="empty">流程跑到比价阶段后显示成本、加价与卖价</div></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>业务指标</h2>
+        <div class="body">
+          <div class="metrics">
+            <div class="m"><div class="lab">阶段完成</div><div class="num" id="mDone">0</div></div>
+            <div class="m"><div class="lab">船期</div><div class="num" id="mSched">0</div></div>
+            <div class="m"><div class="lab">运价</div><div class="num" id="mRate">0</div></div>
+          </div>
+          <div class="note info" style="margin-top:12px">
+            所有金额由确定性 <b>Pricing Engine</b> 计算，Agent 只负责措辞，不得改动数字。
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>
+          <span class="tabs" style="border:none">
+            <span class="tab on" id="tabAudit" onclick="switchTab('audit')">审计事件</span>
+            <span class="tab" id="tabAgent" onclick="switchTab('agent')">Agent 运行</span>
+          </span>
+          <span class="cnt" id="cntLog">—</span>
+        </h2>
+        <div class="body"><div class="log" id="log"><div><span class="tm">--:--:--</span><span>等待开始…</span></div></div></div>
+      </div>
+
+      <div class="card">
+        <h2>闸门说明</h2>
+        <div class="body">
+          <div class="note warn">
+            <b>报价发送</b>与<b>订舱</b>是代码级硬门禁：未审批的报价无法发送，未发送的报价无法订舱。<br>
+            编排层只能<b>排序</b>，不能<b>授权</b>。
+          </div>
+          <div style="margin-top:11px">
+            <div class="kv"><span class="k">自动阶段</span><span class="v" style="text-align:left;font-size:11.5px" id="autoList">—</span></div>
+            <div class="kv"><span class="k">闸门阶段</span><span class="v" style="text-align:left;font-size:11.5px" id="gateList">—</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const H={'Content-Type':'application/json','X-Demo-User':'sales001','X-Demo-Tenant':'tenant-demo'};
+
+/* Stage metadata is the UI contract. The keys must match orchestrator.STAGES. */
+const STAGE_META={
+  parse:          {t:'询价解析', d:'Agent + 校验'},
+  schedules:      {t:'船期查询', d:'DCSA Adapter'},
+  rates:          {t:'运价查询', d:'合约/指数'},
+  rfq:            {t:'发送询价', d:'Supplier Agent'},
+  supplier_quotes:{t:'收集报价', d:'邮件/Webhook'},
+  optimize:       {t:'比价定价', d:'Pricing Engine'},
+  hitl_review:    {t:'人工放行', d:'闸门', gate:true},
+  quote_send:     {t:'发送报价', d:'闸门', gate:true},
+  booking:        {t:'订舱', d:'Booking Adapter'},
+  vessel_tracking:{t:'船位跟踪', d:'AIS + 延误预警'}
+};
+const STAGES=Object.keys(STAGE_META);
+
+let state={inquiry_id:null, stages:{}, pending:null, logTab:'audit', busy:false};
+
+function ts(){const d=new Date();return d.toTimeString().slice(0,8)}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
+
+function buildRail(){
+  document.getElementById('rail').innerHTML=STAGES.map((s,i)=>{
+    const m=STAGE_META[s];
+    return `<div class="step${m.gate?' gate':''}" id="st_${s}">
+      <div class="n">${i+1}</div><div class="t">${m.t}</div><div class="d">${m.d}</div></div>`;
+  }).join('');
+}
+function setStage(stage,cls){
+  const el=document.getElementById('st_'+stage);
+  if(!el)return;
+  el.className='step'+(STAGE_META[stage].gate?' gate':'')+(cls?' '+cls:'');
+}
+function log(msg,cls){
+  const el=document.getElementById('log');
+  const d=document.createElement('div');
+  d.innerHTML=`<span class="tm">${ts()}</span><span${cls?` style="color:${cls}"`:''}>${msg}</span>`;
+  el.appendChild(d); el.scrollTop=el.scrollHeight;
+}
+function clearLog(){document.getElementById('log').innerHTML=''}
+
+function reset(){
+  state={inquiry_id:null,stages:{},pending:null,logTab:state.logTab,busy:false};
+  buildRail();
+  document.getElementById('trace').innerHTML='<div class="empty">点击「运行完整流程」，系统会依次执行各阶段并在闸门处停下等待人工放行</div>';
+  document.getElementById('gatebox').innerHTML='';
+  document.getElementById('quote').innerHTML='<div class="empty">流程跑到比价阶段后显示成本、加价与卖价</div>';
+  document.getElementById('cntTrace').textContent='尚未运行';
+  document.getElementById('cntQuote').textContent='未生成';
+  ['mDone','mSched','mRate'].forEach(id=>document.getElementById(id).textContent='0');
+  clearLog();
+}
+
+/* ---- rendering of the trace ---- */
+function badge(st){
+  const m={ok:['b-ok','✓'],waiting_approval:['b-wait','⏸'],failed:['b-fail','✕'],skipped:['b-skip','–']};
+  const [c,g]=m[st]||['b-run','•'];
+  return `<div class="badge ${c}">${g}</div>`;
+}
+function outputLines(out){
+  if(!out)return '';
+  const keys=Object.keys(out).filter(k=>k!=='resume_hint'&&k!=='missing_fields');
+  if(!keys.length)return '';
+  return `<div class="sout">${keys.map(k=>{
+    let v=out[k];
+    if(v===null||v===undefined)return '';
+    if(Array.isArray(v))v=v.length>6?v.slice(0,6).join(', ')+' …':v.join(', ');
+    if(typeof v==='object')v=JSON.stringify(v);
+    return `<b>${esc(k)}</b> = ${esc(v)}`;
+  }).filter(Boolean).join(' &nbsp;·&nbsp; ')}</div>`;
+}
+function renderTrace(trace){
+  const el=document.getElementById('trace');
+  el.innerHTML=trace.map(s=>{
+    const m=STAGE_META[s.stage]||{t:s.stage,d:''};
+    const g=m.gate?'<span class="pill gate">闸门</span>':'';
+    const ocean=s.stage==='vessel_tracking'?'<span class="pill ocean">AIS</span>':'';
+    return `<div class="srow">${badge(s.status)}
+      <div class="smain">
+        <div class="snm">${esc(m.t)} <span style="color:#B5B3AD;font-weight:400">${esc(s.stage)}</span>${g}${ocean}</div>
+        <div class="sdetail">${esc(s.detail||'')}</div>
+        ${outputLines(s.outputs)}
+      </div></div>`;
+  }).join('');
+}
+
+/* ---- run the pipeline ---- */
+async function runPipeline(auto){
+  if(state.busy)return;
+  state.busy=true;
+  const b1=document.getElementById('btnRun'), b2=document.getElementById('btnAuto');
+  b1.disabled=b2.disabled=true; b1.innerHTML='<span class="spin"></span>运行中';
+  reset(); state.busy=true;
+  clearLog();
+  log('① 创建询价（模拟客户来信）…');
+  try{
+    const inq=await createInquiry();
+    state.inquiry_id=inq;
+    log(`询价已创建：${inq}`,'#0F6E56');
+    if(auto)log('提示：一键直通会跳过人工审批，仅用于演示','#BA7517');
+
+    await animateThrough();
+
+    const r=await fetch('/api/v1/orchestrate/run',{method:'POST',headers:H,
+      body:JSON.stringify({inquiry_id:inq,auto_approve:!!auto,vessel_name:vesselName()})});
+    const j=await r.json();
+    if(!r.ok)throw new Error(shortErr(j.detail));
+    applyRun(j);
+    await loadLogs();
+  }catch(e){
+    log('运行失败：'+e.message,'#A32D2D');
+  }finally{
+    state.busy=false;
+    b1.disabled=b2.disabled=false; b1.textContent='运行完整流程';
+  }
+}
+
+function vesselName(){return (document.getElementById('vessel').value||'').trim()||null}
+
+async function createInquiry(){
+  const r=await fetch('/api/v1/messages/inbound',{method:'POST',headers:H,body:JSON.stringify({
+    external_message_id:'demo-'+Date.now(),
+    sender_email:'buyer@acme-import.com',
+    subject:'Ocean freight quotation request',
+    body:'We need 1x40HQ from Shanghai to Los Angeles, ETD 2026-09-25, commodity furniture.'
+  })});
+  const j=await r.json();
+  if(!r.ok)throw new Error(shortErr(j.detail));
+  // Demo body is fixed and always complete; patch defensively for incomplete parses.
+  if((j.missing_fields||[]).length){
+    await fetch(`/api/v1/inquiries/${j.inquiry_id}`,{method:'PATCH',headers:H,
+      body:JSON.stringify({etd:'2026-09-25'})});
+    log(`补全缺失字段：${j.missing_fields.join('、')}`);
+  }
+  return j.inquiry_id;
+}
+
+/* Light animation: the real work happens in one backend call, but showing stages
+   progressing makes it legible. Never shows a stage as done before it actually is —
+   the authoritative state always comes from the trace. */
+async function animateThrough(){
+  for(const s of STAGES.slice(0,6)){
+    setStage(s,'active'); log(`执行 ${STAGE_META[s].t} …`);
+    await sleep(230);
+  }
+}
+
+function applyRun(run){
+  const trace=run.trace||[];
+  // Reset every stage, then paint the truth from the trace.
+  STAGES.forEach(s=>setStage(s,null));
+  trace.forEach(s=>{
+    setStage(s.stage,s.status==='ok'?'done':(s.status==='waiting_approval'?'active':(s.status==='failed'?'failed':null)));
+  });
+  renderTrace(trace);
+
+  const done=trace.filter(s=>s.status==='ok').length;
+  document.getElementById('mDone').textContent=done;
+  document.getElementById('cntTrace').textContent=`${done} / ${STAGES.length} 阶段完成`;
+
+  // metric extraction from stage outputs
+  const sch=trace.find(s=>s.stage==='schedules');
+  const rt=trace.find(s=>s.stage==='rates');
+  if(sch)document.getElementById('mSched').textContent=sch.outputs.schedule_count||0;
+  if(rt)document.getElementById('mRate').textContent=rt.outputs.rate_count||0;
+
+  renderQuote(trace);
+  renderGate(run);
+
+  if(run.status==='completed')log('流程完成：报价已发送、订舱已确认、船位已跟踪','#0F6E56');
+  else if(run.status==='waiting_approval')log('流程已停在人工闸门，等待放行','#BA7517');
+  else if(run.status==='failed')log('流程中止：'+(run.pending&&run.pending.reason||'业务规则拒绝'),'#A32D2D');
+}
+
+function renderQuote(trace){
+  const opt=trace.find(s=>s.stage==='optimize');
+  const box=document.getElementById('quote');
+  if(!opt||!opt.outputs.quote_id){
+    box.innerHTML='<div class="empty">流程跑到比价阶段后显示成本、加价与卖价</div>';return;
+  }
+  const o=opt.outputs;
+  const margin=o.sell_amount-o.cost_amount;
+  const pct=o.cost_amount?((margin/o.cost_amount)*100).toFixed(1):'0';
+  document.getElementById('cntQuote').textContent=o.quote_id;
+  box.innerHTML=`
+    <div class="kv"><span class="k">报价单</span><span class="v">${esc(o.quote_id)}</span></div>
+    <div class="kv"><span class="k">选中供应商报价</span><span class="v">${esc(o.supplier_quote_id||'—')}</span></div>
+    <div class="kv"><span class="k">成本</span><span class="v">USD ${fmt(o.cost_amount)}</span></div>
+    <div class="kv"><span class="k">加价</span><span class="v">USD ${fmt(margin)} <span style="color:#6B6A66">(${pct}%)</span></span></div>
+    <div class="kv"><span class="k">卖价</span><span class="v"><big>USD ${fmt(o.sell_amount)}</big></span></div>
+    <div class="note info" style="margin-top:11px">
+      比价规则：总成本 + 航程惩罚 − 免箱期奖励 − 可靠性奖励，取最优解后按
+      <b>max(最低毛利, 成本×毛利率)</b> 加价。全流程无模型参与金额计算。
+    </div>`;
+}
+function fmt(n){return Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}
+
+function renderGate(run){
+  const box=document.getElementById('gatebox');
+  if(run.status!=='waiting_approval'||!run.pending||!run.pending.quote_id){box.innerHTML='';return}
+  const p=run.pending;
+  if(p.missing_fields){
+    box.innerHTML=`<div class="gatebox">
+      <div class="gt">⏸ 停在解析阶段：询价信息不完整</div>
+      <div class="gb">缺少：<b>${esc(p.missing_fields.join('、'))}</b><br>
+        系统不会猜测缺失信息，而是生成追问消息返回客户。</div></div>`;
+    return;
+  }
+  box.innerHTML=`<div class="gatebox">
+    <div class="gt">⏸ 停在人工闸门：报价待审批</div>
+    <div class="gb">
+      报价单 <b>${esc(p.quote_id)}</b><br>
+      成本 USD ${fmt(p.cost_amount)} → 卖价 <b>USD ${fmt(p.sell_amount)}</b>
+      （毛利 USD ${fmt(p.margin_amount)}）<br>
+      <span style="display:block;margin-top:6px">
+        此时报价<b>尚未发送给客户</b>。未审批的报价在代码层无法发送——这正是需要人来决定的地方：价格是否可接受、客户是否值得这张单。</span>
+    </div>
+    <div class="gacts">
+      <button class="go" onclick="approve('${p.quote_id}')">批准并继续</button>
+      <button onclick="reject('${p.quote_id}')">驳回</button>
+    </div></div>`;
+}
+
+async function approve(quoteId){
+  try{
+    log('人工批准报价 '+quoteId);
+    const r1=await fetch(`/api/v1/quotes/${quoteId}/review`,{method:'POST',headers:H,
+      body:JSON.stringify({action:'approve',comment:'演示审批'})});
+    if(!r1.ok)throw new Error(shortErr((await r1.json()).detail));
+    setStage('hitl_review','done'); setStage('quote_send','active'); setStage('booking','active'); setStage('vessel_tracking','active');
+    log('审批通过，继续执行发送 → 订舱 → 船位跟踪');
+    const r2=await fetch('/api/v1/orchestrate/continue',{method:'POST',headers:H,
+      body:JSON.stringify({quote_id:quoteId,vessel_name:vesselName()})});
+    const j=await r2.json();
+    if(!r2.ok)throw new Error(shortErr(j.detail));
+    applyRun(j);
+    await loadLogs();
+  }catch(e){
+    log('操作失败：'+e.message,'#A32D2D');
+  }
+}
+async function reject(quoteId){
+  try{
+    const r=await fetch(`/api/v1/quotes/${quoteId}/review`,{method:'POST',headers:H,
+      body:JSON.stringify({action:'reject',comment:'演示驳回'})});
+    if(!r.ok)throw new Error(shortErr((await r.json()).detail));
+    setStage('hitl_review','failed');
+    log('报价已驳回，流程终止，不会发送给客户','#A32D2D');
+    document.getElementById('gatebox').innerHTML=
+      '<div class="gatebox"><div class="gt">✕ 已驳回</div><div class="gb">报价未发送，流程终止。客户不会收到任何消息。</div></div>';
+    await loadLogs();
+  }catch(e){log('操作失败：'+e.message,'#A32D2D')}
+}
+
+/* ---- audit / agent logs ---- */
+function switchTab(t){
+  state.logTab=t;
+  document.getElementById('tabAudit').classList.toggle('on',t==='audit');
+  document.getElementById('tabAgent').classList.toggle('on',t==='agent');
+  loadLogs();
+}
+async function loadLogs(){
+  if(!state.inquiry_id)return;
+  try{
+    if(state.logTab==='agent'){
+      const r=await fetch('/api/v1/dashboard',{headers:H});
+      const j=await r.json();
+      clearLog();
+      log(`Agent 运行记录总数：${j.agent_runs}`,`#185FA5`);
+      log(`审计事件总数：${j.audit_events}`);
+      log(`询价 ${j.inquiries} · 供应商报价 ${j.supplier_quotes} · 客户报价 ${j.customer_quotes}`);
+      log(`订舱 ${j.bookings} · 跟踪事件 ${j.tracking_events}`);
+    }else{
+      const r=await fetch(`/api/v1/orchestrate/status/${state.inquiry_id}`,{headers:H});
+      const j=await r.json();
+      if(!r.ok)throw new Error(shortErr(j.detail));
+      clearLog();
+      log(`询价状态：${j.status}`,`#185FA5`);
+      log(`RFQ：${j.rfq_id||'—'}`);
+      log(`报价单：${j.quote_id||'—'}（${j.quote_status||'—'}）`);
+      log(`订舱：${j.booking_id||'—'}`);
+      log(j.waiting_on?`当前等待：${j.waiting_on}`:'当前无阻塞','#0F6E56');
+    }
+    document.getElementById('cntLog').textContent=state.logTab==='agent'?'汇总':'实时';
+  }catch(e){log('日志加载失败：'+e.message,'#A32D2D')}
+}
+
+function shortErr(d){
+  if(!d)return '未知错误';
+  if(typeof d==='string')return d;
+  return Array.isArray(d)?d.map(x=>x.msg||JSON.stringify(x)).join('; '):JSON.stringify(d);
+}
+
+/* ---- boot ---- */
+async function boot(){
+  buildRail();
+  try{
+    const r=await fetch('/api/v1/orchestrate/stages',{headers:H});
+    const j=await r.json();
+    document.getElementById('autoList').textContent=(j.auto||[]).map(s=>(STAGE_META[s]||{}).t||s).join(' · ');
+    document.getElementById('gateList').textContent=(j.gated||[]).map(s=>(STAGE_META[s]||{}).t||s).join(' · ');
+  }catch(e){/* stage list is decorative; the rail is already built locally */}
+}
+boot();
+</script>
+</body>
+</html>

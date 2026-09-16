@@ -1,0 +1,23 @@
+[project]
+name = "ai-freight-forwarder-multi-agent"
+version = "1.0.0rc1"
+description = "Production reference implementation for a multi-agent freight forwarding workflow"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+# This codebase deliberately uses terse one-line guards and semicolons in the dense service
+# layer, e.g. `if not q: raise KeyError('inquiry_not_found')`.
+#
+# Declaring that here makes `ruff check` a *real* gate. Previously the default rule set was
+# active, so the linter emitted ~660 style warnings and CI did not run it at all -- which
+# meant a genuine F401/F811/F841 could hide in the noise and nobody would notice.
+# Everything else (including the whole F family) is enforced.
+ignore = ["E401", "E701", "E702", "E703"]

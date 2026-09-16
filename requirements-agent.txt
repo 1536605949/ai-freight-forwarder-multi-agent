@@ -1,0 +1,15 @@
+# Optional: real LLM orchestration via Microsoft Agent Framework.
+#
+# Install this ONLY when running with AGENT_PROVIDER=maf_openai.
+# Mock mode (the default, and what tests/demos use) requires no agent framework.
+#
+#     pip install -r requirements-agent.txt
+#     export AGENT_PROVIDER=maf_openai
+#     export OPENAI_API_KEY=...
+#     export OPENAI_CHAT_MODEL=...
+#
+# Why this is a separate file: agent-framework pins dependency versions that conflict
+# with the fastapi pin in requirements.txt, so installing both in one resolve fails
+# (pip: ResolutionImpossible). Keeping it opt-in keeps the default install clean.
+-r requirements.txt
+agent-framework>=1.17,<2
