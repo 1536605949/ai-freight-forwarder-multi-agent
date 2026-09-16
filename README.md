@@ -2,7 +2,7 @@
 
 > 国际货代销售全链路：**主动获客 → 询价 → 航线/运价 → 供应商 RFQ → 报价优化 → 人工审批 → 订舱 → 船位跟踪 → 复购跟进**
 
-[![ci](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
+[![ci](https://github.com/1536605949/ai-freight-forwarder-multi-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/1536605949/ai-freight-forwarder-multi-agent/actions/workflows/ci.yml)
 
 **这是一个生产级参考实现（Release Candidate），不是聊天机器人 Demo。**
 
