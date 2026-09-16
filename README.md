@@ -18,13 +18,16 @@
 不需要 LLM Key、不需要任何外部账号、不需要数据库服务：
 
 ```bash
-git clone <this-repo> && cd ai-freight-forwarder-multi-agent
-python scripts/bootstrap_dev.py          # 建 venv + 装依赖 + 建库 + 种子（幂等，可重复执行）
+git clone https://github.com/1536605949/ai-freight-forwarder-multi-agent.git
+cd ai-freight-forwarder-multi-agent
+python scripts/bootstrap_dev.py          # 建 venv + 装依赖 + alembic upgrade head + 种子（幂等，可重复执行）
 python -m uvicorn app.main:app --port 8100
 
 # 另开一个终端：
+pytest -q                                # 单元 + 集成：189 passed
 python evaluation/run_eval.py            # 行为评测：6/6 通过
 python scripts/delivery_check.py         # 交付验收：40/40 通过
+sha256sum -c SHA256SUMS.txt              # 完整性校验：130/130 OK
 ```
 
 打开 <http://localhost:8100/demo/overview.html>，点「运行完整流程」——
@@ -34,16 +37,18 @@ python scripts/delivery_check.py         # 交付验收：40/40 通过
 
 | 项目 | 结果 | 复现命令 |
 |---|---|---|
-| 单元 / 集成测试 | **179 passed** | `pytest -q` |
+| 单元 / 集成测试 | **189 passed** | `pytest -q` |
 | 覆盖率 | **83%**（`app` + `worker` + `evaluation`） | `pytest --cov=app --cov=worker --cov=evaluation` |
 | 静态检查 | **ruff 全绿**（规则集见 `pyproject.toml`） | `ruff check app tests worker evaluation scripts` |
 | 行为评测 | **6/6**，全部真实执行 | `python evaluation/run_eval.py` |
 | 交付验收 | **40/40** | `python scripts/delivery_check.py` |
+| 完整性校验 | **130/130 OK** | `sha256sum -c SHA256SUMS.txt` |
 | API 路由 | **43** | `GET /docs` |
 | 数据表 / 索引 | **20 / 35** | `alembic upgrade head` |
 | 模块循环依赖 | **0** | `tests/test_architecture_asset.py` |
 
 > 上述数字都是本仓库当前代码实测所得，不是目标值。跑一遍即可复核。
+> CI 逐步执行 lint / tests / packaging / checksums / manifest / migrations / smoke boot。
 
 ---
 
@@ -367,6 +372,30 @@ revision 产出的 schema**——两个都升到 `0001_initial` 的库互相不�
 
 `tests/test_migrations.py` 守住真正重要的不变量：**空库升到 head 后的 schema 必须与 ORM 声明完全一致**
 （表、列、可空性、主键、唯一约束），并且 `downgrade base` 不留残余、重复升降级结果可复现。
+
+### 本地引导也走 alembic，不走 create_all
+
+`scripts/bootstrap_dev.py` 建库时执行的是 `alembic upgrade head`，**不是** `Base.metadata.create_all()`。
+
+这是一个真实踩过的坑：`create_all()` 会把表全部建出来，但**不会写 `alembic_version` 行**。
+于是本地库看起来完全健康，而下一次 `alembic upgrade head`——也就是生产路径——会直接死在
+`table agent_runs already exists`。根因是**schema 有两个真相来源**，而先漂移的那个永远是没被测的那个。
+
+现在引导与生产走同一条代码路径；`tests/test_migrations.py` 用 AST 断言 `bootstrap_dev.py`
+里不存在 `create_all` 调用，并断言它确实 shell out 到 `alembic upgrade head`。
+
+老库（此前用 `create_all` 建的）会被明确识别并给出两条出路，而不是抛一句原始 alembic 报错：
+
+```
+ERROR: this database was created before alembic owned the schema
+       (its tables exist but there is no alembic_version row)
+HINT : If it holds nothing you need, rebuild it:
+       `python scripts/bootstrap_dev.py --skip-install --reset-db`.
+       Otherwise, having confirmed the schema is current, adopt it with `alembic stamp head`.
+```
+
+刻意**不**自动 stamp：只有操作者能判断那个 schema 是否真的等于 head，
+自动 stamp 会把真实漂移悄悄掩盖过去。
 
 ---
 

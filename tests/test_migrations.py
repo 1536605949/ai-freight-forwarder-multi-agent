@@ -17,6 +17,7 @@ The migration is now an explicit, frozen snapshot. These tests hold it to that:
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
 
 import pytest
@@ -177,3 +178,81 @@ def _schema_fingerprint(engine) -> dict[str, list[tuple]]:
                       for c in insp.get_columns(name))
         out[name] = cols
     return out
+
+
+# --------------------------------------------------------------------------- #
+# The bootstrap must not become a second source of truth for the schema
+# --------------------------------------------------------------------------- #
+
+BOOTSTRAP = ROOT / 'scripts' / 'bootstrap_dev.py'
+
+
+def _call_names(path: Path) -> list[str]:
+    tree = ast.parse(path.read_text(encoding='utf-8'))
+    return [
+        node.func.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    ]
+
+
+def test_bootstrap_never_creates_the_schema_itself():
+    """`create_all` here would produce a database alembic cannot adopt.
+
+    The bootstrap used to call `Base.metadata.create_all()`, which builds every table but
+    writes no `alembic_version` row. The local database then looked healthy while the
+    next `alembic upgrade head` -- the production path -- died with
+    `table agent_runs already exists`. AST-checked so the docstring explaining this is
+    not mistaken for a call.
+    """
+    offenders = [n for n in _call_names(BOOTSTRAP) if n == 'create_all']
+    assert not offenders, (
+        'bootstrap_dev.py must build the schema with `alembic upgrade head`, not '
+        'create_all -- otherwise a freshly bootstrapped database cannot be migrated'
+    )
+
+
+def test_bootstrap_drives_the_schema_through_alembic():
+    """The upgrade must actually be invoked, not merely mentioned."""
+    tree = ast.parse(BOOTSTRAP.read_text(encoding='utf-8'))
+    # The command is an argv *list* argument, so the constants live inside an ast.List
+    # rather than directly in node.args.
+    argv_lists = [
+        [el.value for el in arg.elts if isinstance(el, ast.Constant)]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == 'run'
+        for arg in node.args
+        if isinstance(arg, ast.List)
+    ]
+    assert any({'alembic', 'upgrade', 'head'} <= set(argv) for argv in argv_lists), (
+        f'expected bootstrap_dev.py to shell out to `alembic upgrade head`; '
+        f'saw {argv_lists}'
+    )
+
+
+def test_alembic_revision_reports_nothing_for_a_database_alembic_does_not_own(
+    tmp_path, monkeypatch,
+):
+    """A `create_all` database has no revision, which is what triggers the diagnosis."""
+    from scripts.bootstrap_dev import _alembic_revision
+
+    url = f'sqlite:///{(tmp_path / "legacy.db").as_posix()}'
+    monkeypatch.setenv('DATABASE_URL', url)
+
+    engine = create_engine(url)
+    Base.metadata.create_all(engine)          # stands in for the old bootstrap
+    engine.dispose()
+
+    assert _alembic_revision(Path(sys.executable)) is None
+
+
+def test_alembic_revision_reports_the_revision_once_migrated(alembic_cfg):
+    from scripts.bootstrap_dev import _alembic_revision
+
+    cfg, _url = alembic_cfg
+    command.upgrade(cfg, 'head')
+
+    assert _alembic_revision(Path(sys.executable)) == '0001_initial'
+

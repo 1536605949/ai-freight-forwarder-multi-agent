@@ -1,5 +1,5 @@
 # Generated file list -- what ships in this repository.
-# Regenerate after adding or removing files.
+# Regenerate with:  python scripts/gen_checksums.py
 ./.env.example
 ./.gitattributes
 ./.github/workflows/ci.yml
@@ -11,6 +11,7 @@
 ./MANIFEST.txt
 ./Makefile
 ./README.md
+./SHA256SUMS.txt
 ./VERSION
 ./alembic.ini
 ./app/__init__.py
@@ -95,6 +96,7 @@
 ./scripts/demo_scenario.py
 ./scripts/dev_token.py
 ./scripts/export_openapi.py
+./scripts/gen_checksums.py
 ./scripts/release_gate.py
 ./scripts/restore.sh
 ./scripts/seed_demo.py
@@ -115,6 +117,7 @@
 ./tests/test_migrations.py
 ./tests/test_orchestrator.py
 ./tests/test_packaging.py
+./tests/test_packaging_manifest.py
 ./tests/test_parser.py
 ./tests/test_pricing_hitl.py
 ./tests/test_prospecting.py

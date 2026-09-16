@@ -24,6 +24,17 @@ jobs:
    - name: packaging invariants
      run: python scripts/verify_package.py
 
+   # SHA256SUMS.txt must validate against the bytes this clone actually received.
+   # Regenerating it from Windows working-copy bytes once produced CRLF hashes that
+   # failed here for 11 files -- the integrity artifact did not protect the artifact.
+   - name: checksums
+     run: sha256sum -c SHA256SUMS.txt
+
+   # MANIFEST.txt and SHA256SUMS.txt must describe the tracked file list, and the
+   # generator must be the source of truth (catches a hand-edited or stale manifest).
+   - name: manifest freshness
+     run: python scripts/gen_checksums.py --check
+
    # The initial migration must actually build a working schema, not just parse.
    - name: migrations
      run: alembic upgrade head

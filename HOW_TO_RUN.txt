@@ -27,16 +27,29 @@ Makefile 等价入口：make bootstrap / make run / make test / make acceptance
 
 ★ 验证清单（服务启动后，另开终端）
 ----------------------------------
-    pytest -q                                        # 179 passed
+    pytest -q                                        # 189 passed
     ruff check app tests worker evaluation scripts   # All checks passed
     python evaluation/run_eval.py                    # 6/6，全部真实执行
     python scripts/delivery_check.py                 # 40/40
     python -m alembic upgrade head                   # 迁移可用
+    sha256sum -c SHA256SUMS.txt                      # 130/130 OK（Linux/macOS/Git Bash）
 
 评测脚本的设计要点：**没执行的用例不算通过**。退出码 1 的条件是
 「critical 用例失败」或「critical 用例从未执行」。未知 kind/rule 一律 FAIL。
 tests/test_eval_harness.py 用变异测试证明它真的会失败——不能失败的评测脚本
 比没有评测脚本更危险。
+
+关于 SHA256SUMS.txt：校验和按 **git clone 后实际拿到的字节** 计算
+（文本归一化为 LF，二进制按原样），不是按开发机工作区字节。改动文件后重新生成：
+
+    python scripts/gen_checksums.py            # 重写 MANIFEST.txt / SHA256SUMS.txt
+    python scripts/gen_checksums.py --check    # 只检查是否过期（CI 用，过期则退出码 1）
+
+关于建库：bootstrap 执行的是 `alembic upgrade head`，不是 create_all。
+create_all 会建出表但不写 alembic_version 行，导致之后 `alembic upgrade head`
+死在 "table ... already exists"。如果你有一个更早版本建的老库，bootstrap 会
+明确报出来并给出两条出路（--reset-db 重建，或确认 schema 与 head 一致后
+`alembic stamp head` 收编）。
 
 
 A. 本地业务闭环（无需 LLM Key）—— 手工步骤

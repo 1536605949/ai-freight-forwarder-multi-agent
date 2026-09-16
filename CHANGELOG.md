@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.0.0-rc3 — 第三次复核：完整性制品与 schema 归属
+
+以「交付物自己能不能验证自己」为标准再复核一轮，又发现两个问题。它们的共同点是
+**声明与执行不一致**：文件声称保证某件事，实际并不保证。
+
+### 修复（P0）
+
+- **`SHA256SUMS.txt` 在全新 clone 上校验失败**：该校验和是用 Windows 工作区字节（CRLF）算的，
+  而 `.gitattributes`（`* text=auto eol=lf`）在仓库里存的是 LF。结果是 11 个文件在
+  `git clone` 之后 `sha256sum -c` 直接报错——**完整性制品保护不了它声称要保护的东西**。
+  新增 `scripts/gen_checksums.py`：按「clone 真正拿到的字节」计算（二进制按 NUL 判定后原样，
+  文本先归一化为 LF），两个文件都以 LF 写出，因此跨平台幂等。
+  `tests/test_packaging_manifest.py` 用 `git cat-file blob HEAD:<path>` 作为基准做交叉校验，
+  正是这个测试抓出了最初的 CRLF 缺陷。CI 新增 `sha256sum -c SHA256SUMS.txt` 与
+  `gen_checksums.py --check` 两步。
+- **`bootstrap_dev.py` 让 schema 有了两个真相来源**：它用 `Base.metadata.create_all()` 建库，
+  会建出全部表但**不写 `alembic_version` 行**，于是本地库看似健康、下一次
+  `alembic upgrade head`（生产路径）却死在 `table agent_runs already exists`。
+  已改为执行 `alembic upgrade head`，与生产同一条代码路径；
+  `--reset-db` 会连带清掉 `alembic_version` 再重建。
+  老库会被明确识别（区分「无 `alembic_version` 表」与「表存在但为空」）并给出两条出路，
+  刻意不自动 stamp——自动 stamp 会掩盖真实漂移。
+
+### 修复（P1）
+
+- `scripts/gen_checksums.py` 自身修掉一个构造性缺陷：`MANIFEST.txt` 不能从磁盘读取后计算哈希
+  （本次运行正要重写它，读到的是旧内容），改为对**新内容**取哈希。
+- 10 个文本文件的工作区行尾从 CRLF 归一化为 LF，与仓库内实际存储一致；
+  内容零变化（`git diff` 对这些文件为空）。
+
+### 基线变化
+
+| 指标 | rc2 | rc3 |
+|---|---|---|
+| 测试数 | 179 | 189 |
+| 覆盖率 | 83% | 85% |
+| 完整性校验 | 未纳入 CI | 130/130，CI 强制 |
+| 建库路径 | `create_all`（与迁移脱节） | `alembic upgrade head`（与生产一致） |
+| CI 步骤 | 5 | 7 |
+
 ## 1.0.0-rc2 — 交付可信度复核
 
 第二轮以「能否经得起面试级追问」为标准复核，修复 3 个 P0 并补齐回归测试。

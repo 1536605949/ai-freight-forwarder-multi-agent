@@ -17,7 +17,8 @@ What it does, in order
 1. Check the interpreter is new enough (>= 3.11, per pyproject.toml).
 2. Create `.venv/` if missing.
 3. Install `requirements-dev.txt` into it (unless `--skip-install`).
-4. Create the SQLite directory + all tables (idempotent create_all).
+4. Bring the schema to head with `alembic upgrade head` (idempotent, and the same
+   code path production uses -- see `init_db` for why it is not `create_all`).
 5. Seed `tenant-demo` and print a dev token.
 6. Print the exact commands to start the API, worker and demo page.
 
@@ -196,28 +197,117 @@ def _load_app_modules(py: Path, script: str) -> subprocess.CompletedProcess:
 
 
 def init_db(py: Path, *, reset: bool) -> None:
-    Log.step(4, 6, "Creating database schema")
-    action = "DROP + recreate" if reset else "create (idempotent)"
-    snippet = f"""
+    """Bring the local schema to head **via alembic**, the same path production uses.
+
+    This deliberately does *not* call ``Base.metadata.create_all``.  ``create_all``
+    builds the tables but never writes an ``alembic_version`` row, so the database is
+    left in a state the migration system cannot adopt: the next
+    ``alembic upgrade head`` dies with ``table agent_runs already exists``.  Two
+    sources of truth for the schema is one too many -- and the one that drifts
+    silently is always the one you did not test.
+
+    ``migrations/env.py`` resolves its URL from ``get_settings().database_url``, so
+    this touches exactly the database the app will use.
+    """
+    Log.step(4, 6, "Creating database schema (alembic)")
+
+    if reset:
+        drop = """
 import sys
 sys.path.insert(0, '.')
+from sqlalchemy import text
 from app.db import Base, engine
-import app.models  # noqa: F401 - register all mappers before create_all
-if {reset!r}:
-    Base.metadata.drop_all(engine)
-Base.metadata.create_all(engine)
-print(len(Base.metadata.tables))
+import app.models  # noqa: F401 - register all mappers before drop_all
+Base.metadata.drop_all(engine)
+# alembic_version is alembic's own bookkeeping table, not an ORM model, so drop_all
+# does not know about it. Leaving it behind would make the next upgrade a no-op.
+with engine.begin() as conn:
+    conn.execute(text('DROP TABLE IF EXISTS alembic_version'))
+print('dropped')
+"""
+        proc = _load_app_modules(py, drop)
+        if proc.returncode != 0:
+            raise BootstrapError(
+                "dropping the schema failed (--reset-db)",
+                hint=(proc.stderr or "").strip().splitlines()[-1]
+                if proc.stderr
+                else "Is another process holding the database open?",
+            )
+        Log.ok("schema dropped (--reset-db)")
+
+    result = subprocess.run(
+        [str(py), "-m", "alembic", "upgrade", "head"],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        blob = f"{result.stderr or ''}\n{result.stdout or ''}"
+        lines = [ln.strip() for ln in blob.splitlines() if ln.strip()]
+        # SQLAlchemy signs off with a "Background on this error at: <link>" line, which
+        # is never the line that tells you anything.  Prefer the last line that names
+        # an error, and match the condition against the whole output rather than the
+        # last line -- the useful text is rarely last.
+        named = [ln for ln in lines if "error" in ln.lower()]
+        last = named[-1] if named else (lines[-1] if lines else "")
+
+        # The one failure worth diagnosing for the user: a database built by an older
+        # bootstrap that used create_all, so the tables exist but alembic has no record
+        # of having created them.  Stamping is the non-destructive fix, but only the
+        # operator can know whether that schema really is at head -- so we say so
+        # rather than stamping silently and hiding possible drift.
+        if "already exists" in blob.lower() and not _alembic_revision(py):
+            raise BootstrapError(
+                "this database was created before alembic owned the schema "
+                "(its tables exist but there is no alembic_version row)",
+                hint="If it holds nothing you need, rebuild it: "
+                     "`python scripts/bootstrap_dev.py --skip-install --reset-db`. "
+                     "Otherwise, having confirmed the schema is current, adopt it with "
+                     "`alembic stamp head`.",
+            )
+        raise BootstrapError(
+            "`alembic upgrade head` failed",
+            hint=last or "Run `alembic upgrade head` manually to see why.",
+        )
+
+    revision = subprocess.run(
+        [str(py), "-m", "alembic", "current"],
+        cwd=str(ROOT), capture_output=True, text=True,
+    )
+    at = (revision.stdout or "").strip().splitlines()
+    Log.ok(f"alembic upgrade head: at {at[0] if at else 'head'}")
+
+
+def _alembic_revision(py: Path) -> str | None:
+    """The revision alembic has recorded, or ``None`` if it has recorded nothing.
+
+    Two different situations both mean "alembic does not own this schema", and the
+    operator cares about the same thing in both:
+
+    * no ``alembic_version`` table at all -- built by an older ``create_all`` bootstrap;
+    * the table exists but is empty -- a previous upgrade created its bookkeeping table
+      and then died before it could stamp anything.
+
+    Checking for the *row* rather than the *table* is what distinguishes those from a
+    database that is genuinely under migration control.
+    """
+    snippet = """
+import sys
+sys.path.insert(0, '.')
+from sqlalchemy import inspect, text
+from app.db import engine
+if 'alembic_version' not in inspect(engine).get_table_names():
+    print('')
+else:
+    with engine.connect() as conn:
+        row = conn.execute(text('SELECT version_num FROM alembic_version')).fetchone()
+    print(row[0] if row else '')
 """
     proc = _load_app_modules(py, snippet)
     if proc.returncode != 0:
-        raise BootstrapError(
-            "database initialisation failed",
-            hint=(proc.stderr or "").strip().splitlines()[-1]
-            if proc.stderr
-            else "Re-run with a clean DATABASE_URL.",
-        )
-    table_count = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else "?"
-    Log.ok(f"{action}: {table_count} tables ready")
+        return None
+    lines = (proc.stdout or "").strip().splitlines()
+    return lines[-1].strip() if lines and lines[-1].strip() else None
 
 
 def seed(py: Path) -> None:

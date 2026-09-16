@@ -338,3 +338,86 @@ q.missing_fields=...; q.status=NEEDS_CLARIFICATION if q.missing_fields else READ
 
 这些在 README 的「生产边界（诚实清单）」中同样列出——**知道边界在哪，比假装没有边界更重要。**
 
+---
+
+## 十一、第三次复核（同日）：完整性制品与 schema 归属
+
+第二轮修完后按「**交付物自己能不能验证自己**」再走一遍，又抓到两个问题。它们的共同形态是
+**声明与执行不一致**：某个文件声称保证一件事，实际并不保证。这类问题比明显的 bug 更危险，
+因为它会让人停止检查。
+
+### P0-4　`SHA256SUMS.txt` 在全新 clone 上校验失败
+
+**现象**：`sha256sum -c SHA256SUMS.txt` 在开发机上 128/128 通过，但在 `git clone` 出来的
+Linux 工作区上，**11 个文件失败**。
+
+**根因**：校验和是用 Windows 工作区字节算的（CRLF），而 `.gitattributes` 里的
+`* text=auto eol=lf` 让仓库实际存储 LF。**哈希算的不是 clone 会拿到的东西。**
+换句话说：这个文件的全部意义就是"别人拿到后能验"，而它恰好做不到这件事。
+
+**修复**：新增 `scripts/gen_checksums.py`，按 clone 真正收到的字节计算——
+含 NUL 的按二进制原样处理（与 git `text=auto` 的判定一致），文本先归一化为 LF；
+两个文件均以 LF 写出，跨平台幂等。CI 增加 `sha256sum -c SHA256SUMS.txt`
+与 `python scripts/gen_checksums.py --check` 两步。
+
+**为什么这次能抓到**：`tests/test_packaging_manifest.py` 用
+`git cat-file blob HEAD:<path>`（= clone 的字节）作为基准做交叉校验，而不是拿磁盘文件
+自我比对——**用同一个来源比对同一个来源，是永远不会失败的测试**。
+该测试在实现过程中也暴露了自身一个误判：`git status --porcelain` 会因 stat cache 过期
+把内容未变的文件标成 `M`（行尾归一化恰好触发），因此脏文件判定改用内容口径的
+`git diff --name-only HEAD`。
+
+### P0-5　`bootstrap_dev.py` 让 schema 有了两个真相来源
+
+**现象**：按 README 执行 `python scripts/bootstrap_dev.py` 建库，随后
+`alembic upgrade head`（CI 与生产都走这条）直接失败：
+`sqlite3.OperationalError: table agent_runs already exists`。
+
+**根因**：`init_db()` 用的是 `Base.metadata.create_all()`，它建出全部 20 张表，
+但**不写 `alembic_version` 行**。数据库于是处于一个迁移系统无法接管的状态：
+表都在，迁移系统却认为自己什么都没做过，于是从零重放 `0001_initial` 并撞表。
+这不是"本地环境脏了"，而是**引导脚本和迁移脚本对"谁拥有 schema"给出了两个不同答案**，
+而先漂移的那个永远是没被测的那个。
+
+**修复**：`init_db()` 改为执行 `alembic upgrade head`——与生产同一条代码路径。
+`migrations/env.py` 从 `get_settings().database_url` 取 URL，因此两条路径必然指向同一个库。
+`--reset-db` 除 `drop_all` 外额外清掉 `alembic_version`（它不属于 ORM metadata，
+`drop_all` 不认识它，留着会让下次升级变成 no-op）。
+
+老库会被**明确识别**并给出两条出路，而不是抛一句原始 alembic 报错：
+
+```
+ERROR: this database was created before alembic owned the schema
+       (its tables exist but there is no alembic_version row)
+HINT : ...rebuild it: `python scripts/bootstrap_dev.py --skip-install --reset-db`.
+       Otherwise, having confirmed the schema is current, adopt it with `alembic stamp head`.
+```
+
+诊断区分两种情形：**没有 `alembic_version` 表**（旧 `create_all` 建的库）与
+**表存在但为空**（上次升级建了记账表、却在 stamp 之前就死了）。对操作者而言两者含义相同。
+刻意**不**自动 stamp：只有操作者能判断那个 schema 是否真的等于 head，自动 stamp 会把真实漂移
+悄悄掩盖过去——这与整个项目「宁可停下来问，也不要猜」的取向一致。
+
+`tests/test_migrations.py` 用 AST 固化这条边界：断言 `bootstrap_dev.py` 中不存在
+`create_all` 调用（AST 口径，因此解释性注释不会误伤），并断言它确实 shell out 到
+`alembic upgrade head`；另有两条测试实跑 `_alembic_revision()`，验证"未接管"与
+"已接管"两种数据库都能被正确判定。
+
+### 本轮基线
+
+| 指标 | 第二轮后 | 第三轮后 |
+|---|---|---|
+| 测试数 | 179 | **189** |
+| 覆盖率 | 83% | **85%** |
+| 完整性校验 | 未纳入 CI（且实际会失败） | **130/130，CI 强制** |
+| 建库路径 | `create_all`，与迁移脱节 | **`alembic upgrade head`，与生产一致** |
+| CI 步骤 | 5 | **7** |
+
+### 仍未处理
+
+第十节的「仍未处理（诚实清单）」**全部继续有效**，本轮未触碰。本轮新增的两项均已修复并有回归测试。
+
+> 三轮复核的共同结论：这个项目真正的风险不在"功能没做完"，而在**"声称做了的事，实际没做到"**。
+> 假通过的评测、伪迁移、算错口径的校验和、与迁移脱节的建库脚本，都属于同一类。
+> 面试官最容易击穿的也正是这一类——所以每一处「保证」现在都有一个**能失败的测试**在后面。
+
