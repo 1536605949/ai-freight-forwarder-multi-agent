@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime, timezone
-from sqlalchemy import String, Text, Float, Integer, DateTime, Boolean, ForeignKey, UniqueConstraint, JSON
+from sqlalchemy import String, Text, Float, Integer, DateTime, Boolean, ForeignKey, UniqueConstraint, JSON, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db import Base
 
@@ -54,6 +54,40 @@ class ProspectCandidate(Base):
     created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True), default=now)
     updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True), default=now, onupdate=now)
     __table_args__=(UniqueConstraint('tenant_id','source','source_ref',name='uq_prospect_source_ref'),)
+
+class SourceRun(Base):
+    """One pull from one prospecting source, scheduled or manual.
+
+    `cursor` is the reason this table exists. The source protocol is a paginated fetch, and
+    without a stored cursor every poll re-fetches page 1: the dedupe layer then reports
+    `accepted=0` forever and the job looks healthy while producing nothing new. A silent
+    stall is worse than a visible error, so the position lives in the database rather than
+    in a process variable.
+
+    The row is written as `running` *before* the fetch and updated afterwards, so a process
+    killed mid-fetch leaves evidence instead of disappearing.
+    """
+    __tablename__='source_runs'
+    id:Mapped[str]=mapped_column(String(64), primary_key=True)
+    tenant_id:Mapped[str]=mapped_column(String(64), index=True)
+    # Logical source name the operator configures, e.g. 'canton_fair_2026' or 'mock'.
+    source:Mapped[str]=mapped_column(String(80))
+    kind:Mapped[str]=mapped_column(String(40), default='directory')
+    # running -> ok | exhausted | failed. 'exhausted' is terminal until an operator resets it.
+    status:Mapped[str]=mapped_column(String(40), default='running')
+    cursor_before:Mapped[str|None]=mapped_column(String(200), nullable=True)
+    cursor_after:Mapped[str|None]=mapped_column(String(200), nullable=True)
+    fetched:Mapped[int]=mapped_column(Integer, default=0)
+    accepted:Mapped[int]=mapped_column(Integer, default=0)
+    rejected:Mapped[int]=mapped_column(Integer, default=0)
+    # What the parser actually did ("page 0 via table (42 rows)"). A run that returns 0 rows
+    # because the page changed shape looks identical to a page that is genuinely empty, and
+    # this field is the only thing that tells them apart.
+    note:Mapped[str|None]=mapped_column(Text, nullable=True)
+    error:Mapped[str|None]=mapped_column(Text, nullable=True)
+    started_at:Mapped[datetime]=mapped_column(DateTime(timezone=True), default=now)
+    finished_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True), nullable=True)
+    __table_args__=(Index('ix_source_runs_lookup','tenant_id','source','started_at'),)
 
 class OutreachActivity(Base):
     """Every outbound contact attempt. Drives frequency capping and the compliance audit trail."""

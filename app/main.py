@@ -29,6 +29,7 @@ from app.services.growth import growth_opportunity
 from app.services.lead_outreach import outreach_draft
 from app.services.supplier_email import parse_and_store_supplier_email
 from app.services import prospecting as prospecting_svc
+from app.services import sourcing as sourcing_svc
 from app.services import vessel as vessel_svc
 from app.services import orchestrator as orchestrator_svc
 from app.services.metrics import agent_metrics, graph_metrics
@@ -40,7 +41,7 @@ from app.knowledge.service import ingest_document
 from app.agents.tool_loop import run_tool_loop
 from app.agents.tools import ToolContext
 from app.providers.tracking import get_tracking_provider
-from app.models import Inquiry,SupplierQuote,CustomerQuote,Booking,TrackingEvent,Lead,Customer,AgentRun,AuditEvent,CRMActivity,RateSnapshot,ProspectCandidate,OutreachActivity,KnowledgeDocument
+from app.models import Inquiry,SupplierQuote,CustomerQuote,Booking,TrackingEvent,Lead,Customer,AgentRun,AuditEvent,CRMActivity,RateSnapshot,ProspectCandidate,OutreachActivity,KnowledgeDocument,SourceRun
 from app.metrics import REQUESTS
 from app.logging_utils import configure_logging,log_event
 from app.config import get_settings
@@ -85,6 +86,26 @@ async def api_lead_outreach(lead_id:str,request:Request,db:Session=Depends(get_d
     try:return await outreach_draft(db,p.tenant_id,request.state.trace_id,lead_id)
     except KeyError:raise HTTPException(404,'not found')
     except ValueError as e:raise HTTPException(409,str(e))
+
+# --- Scheduled collection: what the worker pulled, and a manual trigger ---------------
+# The run log is the only way to tell "the page was empty" from "the parser stopped
+# matching", so it is exposed rather than left in a log file.
+@app.get('/api/v1/sources/runs')
+def api_source_runs(source:str|None=None,limit:int=20,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):
+    q=db.query(SourceRun).filter_by(tenant_id=p.tenant_id)
+    if source:q=q.filter_by(source=source)
+    rows=q.order_by(SourceRun.started_at.desc()).limit(min(max(limit,1),200)).all()
+    return {'runs':[{'id':r.id,'source':r.source,'kind':r.kind,'status':r.status,
+        'cursor_before':r.cursor_before,'cursor_after':r.cursor_after,'fetched':r.fetched,
+        'accepted':r.accepted,'rejected':r.rejected,'note':r.note,'error':r.error,
+        'started_at':r.started_at.isoformat() if r.started_at else None,
+        'finished_at':r.finished_at.isoformat() if r.finished_at else None} for r in rows]}
+
+@app.post('/api/v1/sources/{name}/run')
+async def api_source_run(name:str,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):
+    specs=[s for s in sourcing_svc.parse_sources(get_settings().prospecting_sources) if s.name==name]
+    if not specs:raise HTTPException(404,f'source {name!r} is not configured')
+    return await sourcing_svc.run_source(db,p.tenant_id,p.user_id,specs[0])
 
 # --- Prospecting: find and qualify new customers on a target lane ---------------------
 @app.post('/api/v1/prospecting/search')

@@ -44,6 +44,23 @@ class Settings(BaseSettings):
     prospecting_base_url: str | None = None
     prospecting_token: str | None = None
     prospect_default_limit: int = 20
+    # Scheduled collection. Empty means the scheduler collects nothing, which is the right
+    # default: a demo should not silently start hitting third-party sites.
+    #
+    # Format: "kind|name|url[|lane]", comma separated. kind is mock | directory | licensed_vendor.
+    #   PROSPECTING_SOURCES=mock|demo|
+    #   PROSPECTING_SOURCES=directory|canton_fair|https://example.com/exhibitors?page={page}|Shanghai -> Los Angeles
+    prospecting_sources: str = ''
+    # How often a source that still has pages left is polled again.
+    prospecting_source_interval_hours: float = 24.0
+    # A directory that ran out of pages is re-read from the top after this long, because
+    # exhibitor lists grow. Dedupe makes the re-read cheap: known companies import as 0.
+    prospecting_source_rescan_hours: float = 168.0
+    prospecting_source_page_size: int = 50
+    # A run stuck in 'running' older than this is treated as abandoned rather than active.
+    # This is not a concurrency lock (the worker is single-replica); it only stops one slow
+    # run from stacking another on top of it.
+    prospecting_run_stale_minutes: int = 30
     # Frequency capping: how many cold outreach messages one prospect may receive in a window.
     outreach_max_per_window: int = 2
     outreach_window_days: int = 30

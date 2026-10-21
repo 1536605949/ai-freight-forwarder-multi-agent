@@ -15,7 +15,20 @@ Project 2 — 实际运行顺序
 
 然后：
     uvicorn app.main:app --reload --port 8100
-    python -m worker.scheduler        # 另开一个终端，可选
+    python -m worker.scheduler        # 另开一个终端，可选（跟进任务 + 定时抓取）
+
+定时抓取（默认关闭，不配置就什么都不抓）：
+    export PROSPECTING_SOURCES='mock|demo|'          # 先用确定性 mock 源验证管道
+    python -m worker.scheduler --once
+    curl -s localhost:8100/api/v1/sources/runs | python -m json.tool
+
+    真实公开名录（免费）：
+    export PROSPECTING_SOURCES='directory|canton_fair|https://example.com/list?page={page}|Shanghai -> Los Angeles'
+
+    - 遵守 robots.txt；读不到 robots.txt 时**失败关闭**（不抓）。
+    - 不抓海关数据：那是授权制数据，抓数据商门户是违约，不是违反 robots.txt。
+    - 每次运行都留一条 source_runs 记录（游标 + 抓了多少 + 为什么是 0 条）。
+    - 设计与顺序见 docs/ACQUISITION_ROADMAP.md
 
 打开：
     演示入口           http://localhost:8100/demo/

@@ -1,17 +1,17 @@
 # SHA-256 of every tracked file except this one.
 # Verify with:  sha256sum -c SHA256SUMS.txt
 # Regenerate with:  python scripts/gen_checksums.py
-4f76e7ab5293e9a94505859428eb4367e0056e02d624bf7e2021da044b809db9  ./.env.example
+d471d7c1545cabb33b58bd5a19620cf2b4b3fd5d06e1bdef07a72f9829337ea0  ./.env.example
 fdf4715db235a25ffbda0a23d59f72cdecdb9dac4ac991ea289aa632b36a4db5  ./.gitattributes
 a079ead79d1cee806904d5809b43bca615b7715b190401442b3d7b728d0ff46a  ./.github/workflows/ci.yml
 a3d3b5a12db33ea68a4f1ff63e3215af649afb803820a2a934d92c602aead1a6  ./.gitignore
 1a04384ac35262e5e77bc1f9688dec371b9276d80fc651c39547f0b912192f81  ./CHANGELOG.md
 f597d9984d6ff8cc16b809f1dcc3282401634182b89799d99236beac98c55c5b  ./Dockerfile
-03e3d24d490c068841e7e63953908c4b72d97a532f705ab50df3a30d5c80f892  ./HOW_TO_RUN.txt
+1f59b0decf80ed4c69767a9b31edb4756c6312d0d6c3bcd507a8c81d5a764bef  ./HOW_TO_RUN.txt
 7ef0bf31434e3043ea6b0e1e3a501101631254abf355a1108969f3de0c527071  ./LICENSE
 b26b1dcdf1c3553d2ab9e6f4b4018a65c77a134582823339989530191db9ed53  ./MANIFEST.txt
 02084a383d9c3f9562f2863de4a594f246b8655b9c513569bb4aff5945345df9  ./Makefile
-16052bd93fd9846f5731421cfabb0fcd6bd494108aa69d27180b15869260c6df  ./README.md
+23b2f0c7aee5c2783bc5396956ef45b132488aa3421aa1a2cb6b58c734b7bf4d  ./README.md
 23d4049e8038c3ea1f744fd060778f38e4c3c0a8c1892ed7150c993823255c6f  ./VERSION
 d5e997b7f69841ea887174d0d7c835d23bb6ca4d3ee52d4efcff883b722088c9  ./alembic.ini
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./app/__init__.py
@@ -24,7 +24,7 @@ f8aabcc1bcecd47178e1124e2b5493eb6f9973dd9e91f92a8cb08a5e02922f55  ./app/agents/s
 b7c33ca41463b78ad3803b422bee40ace13cc0642583dc0db1f6b88e223efb48  ./app/agents/tool_loop.py
 d311ac1d290ec1b2abe3337a0265bea4f4c2c548d0cfe5617b0172309f341dc7  ./app/agents/tools.py
 5a597bf8be1ad54876d4d7dcdc6dee888fccdc4f60629f12c64465ac55f0ae1f  ./app/auth.py
-f986ca65b407fba56981f29bca735bbfe9319687781724fe72a76c7852d54edc  ./app/config.py
+49e54d57f340dfed47c468778bf493c1621528b8da24020b6cabd395d4b104bf  ./app/config.py
 5e14da2fb4a4b2081f745fa45b4a6bd2600aabaee004fd1fd27b229bac5819ce  ./app/db.py
 d0b0b407dd73d7b7a340c2a7baee646323a95040e1da4948a9d44b5422d936df  ./app/enums.py
 2e7fdd9a47fc4d05aa2ff1dde5f7c4e948d9a5225b49c27e1420ff85d982e531  ./app/graph/__init__.py
@@ -43,13 +43,13 @@ d8fbddc05c081e3c35c3fa79e601315e7372cb7ddbf8d76170dcd90b6fd53a56  ./app/knowledg
 38c3d72b6d36c8f795eded87066f392e8789309d28b5e8c36d4912799621fa67  ./app/knowledge/retrieval.py
 bc22e6112dee54cce116a8477360248b1587d43a0ca529745d19695782fbdedd  ./app/knowledge/service.py
 ac1af0313a45a8942b3df8b9dcf466de8c36dec059ba57fdbbbaf6764d15b4cd  ./app/logging_utils.py
-a79cc1af47b58cf4e6e6626beee8b843b9bc937790e4c754d23d3c4bb1431238  ./app/main.py
+39a8918985e32180ddd76c33074a25769147f368a68cfeea1b8189c847bccd2e  ./app/main.py
 e02561f30cd09122481001ad8ed1c3bf9f389c2508d2069ae4a97e0a757d6551  ./app/metrics.py
-2eb23134db1c59f7ab0a052191880d2769d36465d013dd2be515e7252386eaaf  ./app/models.py
+aaaec26e4de2e1448e77d54a8f6dfaa546929e0b26c66eb0cf99e2558edc3317  ./app/models.py
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./app/providers/__init__.py
 1356a9e829c140a65d053856cbab397d7c4584526f875fba1eba515737e45ab8  ./app/providers/booking.py
 400344d56f68c89ef19dc005c79feb660b1b889b81c11359e12db590e060e2ad  ./app/providers/email.py
-dcf20915839fe89cfb62627514457e00d03cc1deeb988c359ce077b07a007dae  ./app/providers/prospecting.py
+34d69cd782d855cc09c2e205e5f73cbd6669bf3da8f3551cf1441de75f342b64  ./app/providers/prospecting.py
 76ac54b623fefd6518d1149265365cdaaa0edb96512b996edd916d2aa2f29856  ./app/providers/rates.py
 037e6b2418025a95bba3b7138839eb29d8c6fff84d3cbbae6665078503ea681a  ./app/providers/schedule.py
 80d154d3c8fb1a96c5569d0504ae6baad10929fcf00e232dcc8b98cd302e2f43  ./app/providers/tracking.py
@@ -69,7 +69,7 @@ b9b5ded8ff33f777bfa449e45f1aa86b91fcc5bfb7b88d2a83a839dda144f0d2  ./app/services
 8591f59fa8dd0df15c6589f47cf5aa60e9d2ca3675fcee21893c31675cd2605f  ./app/services/metrics.py
 56ee16736381352d3e448d677c3fc90b07ed8ec18e7f1c4653dae629bbd21bca  ./app/services/orchestrator.py
 30bf9e8b5bf60d80eeb95a41ca2887ba23020784b94729c4379add05cc3d063b  ./app/services/pricing.py
-d03f6c32567f7890061fc9aea88baee6df69335ab17110a601201fbabf759740  ./app/services/prospecting.py
+2d04055ce3f84215f455c62d62ec8815c7e5980330d87ae5cd167fbbfdbb1e73  ./app/services/prospecting.py
 dc6d924d8d4182e6e7e5ab1aaa3b0046294fd917c22f92b77f09c07f6c1c84cd  ./app/services/rates.py
 daf3046acfa225b056d16fd4f2b951857b06c8920fd5375e4204265582f0165f  ./app/services/rfq.py
 5be4c52de84fafba4b9f73f39bf9a4dafa8a46766cd6f68678e5278baabf07cb  ./app/services/schedule.py
@@ -86,10 +86,10 @@ feaf6ce31453c5fa9affedecbd4a2f79f1c315ac8ecb31648fcf2b3cb64e2ce0  ./demo_client/
 686bf7eeff9fe9fc0caf33f865e01ee300fa3c0bedd6de98f0e60b6f7ba8a58a  ./deployment/.env.example
 e7fe4c38ba817ce06f5e4d1c9303b124a91efcbb9310beb9264a044d55e7fc9d  ./deployment/docker-compose.yml
 c1c946db6174e464eb1bcf490bc0c00ea53fe6fafed1b5242b04f466ae4477a1  ./deployment/nginx.conf
-2571b704f8aa54b862a0bddfea885a12ab24e5eaad95b59aee0b104410db5f3c  ./docs/ACQUISITION_PLAYBOOK.md
+97cb5832009e7417d0d67cbacd68d4b2d7448073eab7b8379ab4482cbad58455  ./docs/ACQUISITION_PLAYBOOK.md
 481da0c98c3ae1dd1bae037c23a2ad388601ef0003dbea1098e54fe5c64d8b86  ./docs/AGENT_DESIGN.md
 589cc6601891eef56a042dec8d7ae370bcef4e692e25f5d5baec015386d2a341  ./docs/ARCHITECTURE.md
-357c12df1a4233e283575f1e1e0cd4d253a1225819007ed2ddb1863af5991e3d  ./docs/ARCHITECTURE_LAYERS.md
+3b5bbf226e0cdbb0a22186c87f8bccf4266cd0aa0decf3f4d3456ea2cb1edbf7  ./docs/ARCHITECTURE_LAYERS.md
 c3a22b0a389b0876c9dd010b4e8043afc4385d8d7291e806c0a8f46952910581  ./docs/ARCHITECTURE_REVIEW.md
 2134e1a498455b6bae4fa20ef734548c260900793c53a90a63f7e15902d222f2  ./docs/DATA_MODEL.md
 a7d883456ba4f874340c0e62eaab4f84459f09f0d5bfd8f5d50a83b2bbc180a2  ./docs/DATA_SOURCING_CN.md
@@ -111,7 +111,7 @@ a503940fb8ac43fff7ced9ae796587137a4d829141fb97a441e84c8673cf0673  ./migrations/e
 dbdf58f2f07252392a2ec7811a84320cf4eb33981a442087146e03245f2ce30b  ./migrations/versions/0001_initial.py
 b81de2d15d3b2078f90d0116313164c625ce2d6a5d19b467b8f06533c02e8167  ./migrations/versions/0002_knowledge_and_graph.py
 7cd151217d15ffa437e03ffc497fde8114754e891fa94803380d1abd99dc2d10  ./observability/prometheus.yml
-4bac25fc9a43ad7eb494c9f6259306c6b16887b06aa9423a3794abdd627bdb33  ./openapi/freight_agent.openapi.json
+717b84a8d9c45b3bf9224a41d034a69c9e3b2c534cb8c461d820a50e1917a9d5  ./openapi/freight_agent.openapi.json
 d5fd428438b90b6b9a89bd5cd91420fa59397f6312c3490c0b2a1c5566c3d73c  ./postman/Freight_Agent_v1.0.postman_collection.json
 96ad4b66a63f756a7fcd9d583d780b4ccf5fc9ab9ead494f202966835a472d3d  ./pyproject.toml
 7fd5aa0574a17df4da60df53a99267b57c7289b6e21100ee76c4e905dfad0891  ./requirements-agent.txt
@@ -171,4 +171,4 @@ de6ccfd73f14cafebf9f01066b924f4a0728058700e2e984dc257cd6078f3997  ./tests/test_t
 f4f5f1e334f449d815cb1438f549e66d252600316b0cc4a671e63ca938fa5a92  ./tests/test_vessel.py
 d72583310c18c8697969eea4d33b37439a0828bc27831e97baa3f3d8ef7d009e  ./tests/test_worker_scheduler.py
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./worker/__init__.py
-e2e213ccd66756d866c0ec0b7ceea670d4c25614932e5d41f605e7b53506e65f  ./worker/scheduler.py
+eb5717650d5b344af9300d40910beb24e2f3ed940912afd02ec67b86c105a879  ./worker/scheduler.py

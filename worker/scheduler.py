@@ -19,6 +19,7 @@ from app.db import SessionLocal, engine
 from app.schema_guard import ensure_schema
 from app.logging_utils import configure_logging, log_event
 from app.services.followup import process_due
+from app.services.sourcing import run_due_sources
 
 
 async def run_once(db) -> list:
@@ -27,6 +28,18 @@ async def run_once(db) -> list:
     if ids:
         log_event('followup.processed', ids=ids)
     return ids
+
+
+async def run_sources_once(db) -> list[str]:
+    """One collection poll for every configured prospecting source.
+
+    Kept separate from `run_once` so a slow directory fetch cannot delay follow-ups, and so
+    the follow-up contract (`run_once` returns task ids) stays unchanged.
+    """
+    ran = await run_due_sources(db)
+    if ran:
+        log_event('sources.collected', sources=ran)
+    return ran
 
 
 async def main(iterations: int | None = None) -> None:
@@ -45,6 +58,9 @@ async def main(iterations: int | None = None) -> None:
         db = SessionLocal()
         try:
             await run_once(db)
+            # Collection runs after follow-ups so a slow third-party page never delays a
+            # customer-facing task. Both share one session and one error boundary.
+            await run_sources_once(db)
         except Exception as exc:
             # One bad task must not kill the worker: the loop is the only thing keeping
             # follow-ups flowing, so a failure is logged and the next poll proceeds.

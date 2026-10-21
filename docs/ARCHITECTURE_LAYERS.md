@@ -91,6 +91,8 @@ RFQ、HITL、Booking、Tracking、船位延误均以 DB 状态为准，由 Worke
 | 冷启动外发必须有合法依据 | `services/prospecting.py` | `compliance_basis_required` |
 | 触达频率上限 | `services/prospecting.py` | `frequency_cap_exceeded` |
 | 退订即时生效 | `services/prospecting.py` | 候选/Lead/草稿三处同步抑制 |
+| 抓取遵守 robots.txt | `providers/prospecting.py` | 拒绝时抛 `SourceFetchError`，读不到 robots.txt 也失败关闭 |
+| 抓取失败不推进游标 | `services/sourcing.py` | 游标只在成功后写入，失败页下次重读 |
 | 延误预警按订舱去重 | `services/vessel.py` | `deduplicated` |
 | 无订舱不生成客户预警 | `services/vessel.py` | 返回 `alert: null` |
 | 编排不得越过审批闸门 | `services/orchestrator.py` | 停在 `hitl_review`，返回 `waiting_approval` |

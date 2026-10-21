@@ -6,6 +6,8 @@
 > 本文只讲「数据怎么进系统」，合规门禁的细节见 [`OUTREACH_COMPLIANCE.md`](OUTREACH_COMPLIANCE.md)。
 > **只做中国起运**的采购决策（Panjiva 怎么开通、国内数据商怎么选、合同八条、中国海关数据为什么没有邮箱）见
 > [`DATA_SOURCING_CN.md`](DATA_SOURCING_CN.md)。
+> **先做什么、怎么判定该不该花钱**（免费源定时抓取、跨行业复用、阶段验收标准）见
+> [`ACQUISITION_ROADMAP.md`](ACQUISITION_ROADMAP.md)。
 
 ---
 

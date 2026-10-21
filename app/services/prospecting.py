@@ -22,6 +22,7 @@ from app.providers.email import get_email_provider
 from app.services.common import uid, audit
 from app.agents.specialists import run_agent
 from app.config import get_settings
+from app.providers.fieldmap import field_name
 from app.metrics import PROSPECTS_DISCOVERED, OUTREACH_BLOCKED
 
 # Consent states that permit a first cold contact. Everything else is blocked.
@@ -100,53 +101,10 @@ def _norm_company(name:str)->str:
     return folded
 
 
-# Real exports do not use our column names. "Est Volume TEU", "Annual TEU", "货量" and "teu"
-# are the same field; without a mapping the volume silently imports as None, which then
-# scores as a low-volume lead -- a wrong answer that looks like a data problem.
-_HEADER_ALIASES={
-    'company':'company','company name':'company','shipper':'company','公司':'company','企业':'company','公司名称':'company',
-    'country':'country','market':'country','国家':'country',
-    'industry':'industry','sector':'industry','行业':'industry',
-    'est_volume_teu':'est_volume_teu','est volume teu':'est_volume_teu','est_volume':'est_volume_teu',
-    'annual teu':'est_volume_teu','volume':'est_volume_teu','teu':'est_volume_teu','货量':'est_volume_teu',
-    'email':'email','e-mail':'email','mail':'email','邮箱':'email',
-    'contact':'contact_name','contact name':'contact_name','联系人':'contact_name',
-    'title':'contact_title','job title':'contact_title',
-    'phone':'phone','tel':'phone','telephone':'phone','电话':'phone',
-    'website':'website','site':'website','url':'website','网址':'website',
-    'trade_lane':'trade_lane','lane':'trade_lane','route':'trade_lane','航线':'trade_lane',
-    'source_ref':'source_ref','id':'source_ref','record id':'source_ref',
-}
-
-# Customs records have **two** parties on every row, and which one is the lead depends on
-# what you sell. A forwarder selling China-origin ocean freight wants the exporter; a
-# forwarder selling into China wants the importer. Mapping both to `company` would silently
-# keep whichever column the vendor happened to put second, so they get separate names and
-# the caller picks a side.
-_HEADER_ALIASES.update({
-    '采购商':'importer','进口商':'importer','买家':'importer','买方':'importer',
-    'importer':'importer','buyer':'importer','consignee':'importer','进口商名称':'importer',
-    '出口商':'exporter','供应商':'exporter','发货人':'exporter','卖方':'exporter',
-    'exporter':'exporter','supplier':'exporter','shipper name':'exporter',
-    # Shipment facts. Kept in `raw_payload` so the row stays auditable even though only a
-    # handful of them become first-class columns.
-    'hs code':'hs_code','hs编码':'hs_code','商品编码':'hs_code','海关编码':'hs_code',
-    'product':'product','商品':'product','产品':'product',
-    'amount':'amount','value':'amount','金额':'amount','美元金额':'amount',
-    'quantity':'quantity','数量':'quantity',
-    'port of loading':'port_of_loading','起运港':'port_of_loading','装货港':'port_of_loading',
-    'port of discharge':'port_of_discharge','目的港':'port_of_discharge','卸货港':'port_of_discharge',
-    'date':'record_date','日期':'record_date','报关日期':'record_date','提单日期':'record_date',
-})
-
-
-def _field_name(raw:str)->str:
-    k=(raw or '').strip()
-    if not k: return ''
-    low=k.lower()
-    if low in _HEADER_ALIASES: return _HEADER_ALIASES[low]
-    norm=re.sub(r'[^a-z0-9]+','_',low).strip('_')
-    return _HEADER_ALIASES.get(norm,norm)
+# The alias table lives in `app/providers/fieldmap.py` because the directory scraper in
+# `app/providers/prospecting.py` needs the same mapping, and a provider may not import a
+# service. Two copies would drift silently; see the module docstring there.
+_field_name=field_name
 
 
 def parse_csv(content:str)->list[dict]:
