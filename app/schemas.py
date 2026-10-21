@@ -37,6 +37,9 @@ class ProspectImportIn(BaseModel):
     source:str=Field(min_length=2,max_length=80)
     data_origin:str=Field(min_length=2,max_length=80)
     contract_ref:str|None=Field(default=None,max_length=200)
+    # The date the vendor says the data is current to, not the date you imported it.
+    # "Updates daily" is a claim about the feed; this field is what makes it checkable.
+    data_as_of:str|None=Field(default=None,max_length=32)
     format:Literal['json','csv']='json'
     rows:list[dict[str,Any]]|None=None
     content:str|None=None

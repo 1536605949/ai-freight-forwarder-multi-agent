@@ -12,7 +12,7 @@ import csv
 import hashlib
 import io
 import re
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from urllib.parse import urlparse
 from sqlalchemy.orm import Session
 from app.models import ProspectCandidate, OutreachActivity, Lead
@@ -143,7 +143,8 @@ def _clean_row(row:dict,default_lane:str|None)->tuple[dict,str|None]:
 
 
 def import_prospects(db:Session,tenant_id:str,actor:str,*,source:str,data_origin:str,rows:list[dict],
-                     contract_ref:str|None=None,default_lane:str|None=None)->dict:
+                     contract_ref:str|None=None,default_lane:str|None=None,
+                     data_as_of:str|None=None)->dict:
     """Bring a purchased or exported list into the candidate pool.
 
     Import is **not** qualification. Rows land as `status='imported'` with `score=0`, and the
@@ -182,18 +183,19 @@ def import_prospects(db:Session,tenant_id:str,actor:str,*,source:str,data_origin
             country=row['country'],industry=row['industry'],website=row['website'],
             trade_lane=row['trade_lane'],est_volume_teu=row['est_volume_teu'],
             source=source,source_ref=ref,data_origin=data_origin,
-            raw_payload={'row':raw,'contract_ref':contract_ref},
+            raw_payload={'row':raw,'contract_ref':contract_ref,'data_as_of':data_as_of},
             status='imported',score=0,contact_name=row['contact_name'],
             contact_title=row['contact_title'],email=row['email'],phone=row['phone'])
         db.add(p); accepted.append(p)
 
     rejected=sum(reasons.values())
     audit(db,tenant_id,actor,'prospect.imported','source',source,
-        {'data_origin':data_origin,'contract_ref':contract_ref,'accepted':len(accepted),
-         'rejected':rejected,'reasons':reasons})
+        {'data_origin':data_origin,'contract_ref':contract_ref,'data_as_of':data_as_of,
+         'accepted':len(accepted),'rejected':rejected,'reasons':reasons})
     db.commit()
     for p in accepted: db.refresh(p)
-    return {'source':source,'data_origin':data_origin,'accepted':len(accepted),'rejected':rejected,
+    return {'source':source,'data_origin':data_origin,'data_as_of':data_as_of,
+        'accepted':len(accepted),'rejected':rejected,
         'reasons':reasons,'prospects':[_row(p) for p in accepted]}
 
 
@@ -366,6 +368,20 @@ _EVIDENCE_NOTES={
 }
 
 
+def _age_days(stamp:str|None)->int|None:
+    """How old the vendor said this data was.
+
+    None when the date is missing or unparseable -- and also when it is in the future, which
+    is a data error rather than "very fresh". Reporting a negative age would let a bad import
+    look newer than today's.
+    """
+    if not stamp: return None
+    try: as_of=date.fromisoformat(str(stamp)[:10])
+    except ValueError: return None
+    days=(datetime.now(timezone.utc).date()-as_of).days
+    return days if days>=0 else None
+
+
 def prospect_evidence(db:Session,tenant_id:str,prospect_id:str)->dict:
     """What backs this prospect, and whether a human can actually check it.
 
@@ -406,8 +422,12 @@ def prospect_evidence(db:Session,tenant_id:str,prospect_id:str)->dict:
     elif p.website: verifiability='placeholder'
     else: verifiability='traceable'
 
+    stamp=(p.raw_payload or {}).get('data_as_of')
     return {'prospect_id':p.id,'company':p.company,'data_origin':p.data_origin,
         'verifiability':verifiability,'human_can_check':verifiability=='openable',
+        # "Updates daily" is a claim about the feed. This is the date the vendor said the
+        # row was current to, so the claim can be checked instead of believed.
+        'data_as_of':stamp,'age_days':_age_days(stamp),
         'sources':sources,'score':p.score,'score_rationale':p.score_rationale,
         'note':_EVIDENCE_NOTES[verifiability]}
 

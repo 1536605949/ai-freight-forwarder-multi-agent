@@ -98,7 +98,8 @@ async def api_prospect_search(x:ProspectSearchIn,request:Request,db:Session=Depe
 def api_prospect_import(x:ProspectImportIn,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):
     rows=x.rows if x.format=='json' else prospecting_svc.parse_csv(x.content or '')
     return prospecting_svc.import_prospects(db,p.tenant_id,p.user_id,source=x.source,
-        data_origin=x.data_origin,rows=rows or [],contract_ref=x.contract_ref,default_lane=x.default_lane)
+        data_origin=x.data_origin,rows=rows or [],contract_ref=x.contract_ref,
+        default_lane=x.default_lane,data_as_of=x.data_as_of)
 
 @app.get('/api/v1/prospects')
 def api_prospects(status:str|None=None,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):

@@ -353,3 +353,25 @@ def test_scoring_treats_chinese_and_english_industries_alike():
     bulk=score('Bulk Chemicals')
     assert bulk['fit_score']==57.0
     assert '与集装箱航线匹配' not in bulk['reason'], bulk['reason']
+
+
+def test_a_list_records_how_old_the_data_was(db):
+    """"Updates daily" is a claim about the feed. The row has to carry the date it was
+    current to, or nobody can check the claim later."""
+    out=ps.import_prospects(db,'tenant-demo','u',source='tradesns',data_origin='c7',
+        data_as_of='2026-08-01',rows=[_row()])
+    assert out['data_as_of']=='2026-08-01'
+    e=ps.prospect_evidence(db,'tenant-demo',out['prospects'][0]['id'])
+    assert e['data_as_of']=='2026-08-01'
+    assert e['age_days']>=0
+
+    # A missing or nonsensical date is None, never a flattering zero.
+    fresh=ps.import_prospects(db,'tenant-demo','u',source='tradesns',data_origin='c8',
+        rows=[_row(company='No Date Ltd')])
+    e2=ps.prospect_evidence(db,'tenant-demo',fresh['prospects'][0]['id'])
+    assert e2['data_as_of'] is None and e2['age_days'] is None
+
+    future=ps.import_prospects(db,'tenant-demo','u',source='tradesns',data_origin='c9',
+        data_as_of='2099-01-01',rows=[_row(company='Future Ltd')])
+    e3=ps.prospect_evidence(db,'tenant-demo',future['prospects'][0]['id'])
+    assert e3['age_days'] is None, 'a future date is a data error, not freshness'
