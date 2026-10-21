@@ -27,11 +27,11 @@ Makefile 等价入口：make bootstrap / make run / make test / make acceptance
 
 ★ 验证清单（服务启动后，另开终端）
 ----------------------------------
-    pytest -q                                        # 259 passed
+    pytest -q                                        # 266 passed
     ruff check app tests worker evaluation scripts   # All checks passed
     python evaluation/run_eval.py                    # 6/6，全部真实执行
     python evaluation/knowledge_eval.py              # hit@3 95.5%，负例误答 0/12
-    python scripts/delivery_check.py                 # 40/40
+    python scripts/delivery_check.py                 # 44/44
     python -m alembic upgrade head                   # 迁移可用
     sha256sum -c SHA256SUMS.txt                      # 全部 OK（Linux/macOS/Git Bash）
 

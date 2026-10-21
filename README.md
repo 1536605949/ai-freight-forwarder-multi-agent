@@ -24,10 +24,10 @@ python scripts/bootstrap_dev.py          # 建 venv + 装依赖 + alembic upgrad
 python -m uvicorn app.main:app --port 8100
 
 # 另开一个终端：
-pytest -q                                # 单元 + 集成：259 passed
+pytest -q                                # 单元 + 集成：266 passed
 python evaluation/run_eval.py            # 行为评测：6/6 通过
 python evaluation/knowledge_eval.py      # 检索评测：hit@3 95.5%，负例误答 0/12
-python scripts/delivery_check.py         # 交付验收：40/40 通过
+python scripts/delivery_check.py         # 交付验收：44/44 通过
 sha256sum -c SHA256SUMS.txt              # 完整性校验：全部 OK
 ```
 
@@ -50,12 +50,12 @@ curl -s localhost:8100/api/v1/graph/run -H 'content-type: application/json' \
 
 | 项目 | 结果 | 复现命令 |
 |---|---|---|
-| 单元 / 集成测试 | **259 passed** | `pytest -q` |
+| 单元 / 集成测试 | **266 passed** | `pytest -q` |
 | 覆盖率 | **82%** 整体；v2.0 新增模块 **88%** | `pytest --cov=app --cov=worker --cov=evaluation` |
 | 静态检查 | **ruff 全绿**（规则集见 `pyproject.toml`） | `ruff check app tests worker evaluation scripts` |
 | 行为评测 | **6/6**，全部真实执行 | `python evaluation/run_eval.py` |
 | SOP 检索评测 | **hit@1 90.9% / hit@3 95.5% / 负例误答 0** | `python evaluation/knowledge_eval.py` |
-| 交付验收 | **40/40** | `python scripts/delivery_check.py` |
+| 交付验收 | **44/44** | `python scripts/delivery_check.py` |
 | API 路由 | **52** | `GET /docs` |
 | 度量口径 | `GET /api/v1/metrics/agent`（p50/p95、token、成本、闸门分布） | 见下方「可观测性」 |
 | 数据表 / 索引 | **23 / 41** | `alembic upgrade head` |
@@ -494,7 +494,7 @@ worker/scheduler.py  跟进任务轮询（支持 --once 用于 cron）
 evaluation/          行为评测（run_eval.py）+ 检索评测（knowledge_eval.py）
 migrations/          Alembic；0001/0002 均为显式冻结快照
 demo_client/         静态演示页
-tests/               259 个测试
+tests/               266 个测试
 docs/                架构、分层、集成、交付、审查文档
 ```
 
@@ -545,6 +545,34 @@ HINT : If it holds nothing you need, rebuild it:
 
 刻意**不**自动 stamp：只有操作者能判断那个 schema 是否真的等于 head，
 自动 stamp 会把真实漂移悄悄掩盖过去。
+
+### 应用启动时也不再建表
+
+引导脚本改到 alembic 之后，`app/main.py` 的启动钩子仍然留着
+`Base.metadata.create_all(engine)`（非生产环境）。它看起来只是方便，实际是**最后一个
+第二真相来源**，而且失败方式极难归因：
+
+- `create_all` 只补建缺失的**表**，从不给已存在的表加**列**。所以某个迁移一旦新增列，
+  跑过旧版本的人就永久缺这一列，症状是 `no such column: agent_runs.prompt_tokens` ——
+  看起来像查询写错了。
+- 它建出来的库没有 `alembic_version` 行，于是「修复」动作 `alembic upgrade head`
+  会死在 `table agent_runs already exists`。**用来救场的手段被造成问题的东西挡住了。**
+
+v2.0 开发期间这两种情况都真实发生过。现在启动时只做检查
+（`app/schema_guard.py`）：不在 head 就**拒绝启动**并给出确切命令。
+
+```python
+# app/main.py
+@app.on_event('startup')
+def startup():
+    ensure_schema(engine)      # 不在 head 就抛 SchemaNotReady，附带修复命令
+```
+
+刻意**不**在启动时自动升级：进程启动时改 schema，在滚动发布里两个实例会抢同一批 DDL。
+`tests/test_schema_guard.py` 用 AST 断言 `main.py` 里不再出现 `create_all`/`drop_all`，
+并覆盖三种拒绝情形（无 schema / create_all 建的库 / 落后一个 revision）。
+
+**启动即拒绝**比「起来了但 schema 是旧的」更好：前者是一条命令的修复，后者是几小时的排查。
 
 ---
 

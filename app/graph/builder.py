@@ -365,18 +365,29 @@ def build_pipeline_graph(*, db, tenant_id: str, actor: str, trace_id: str):
 
         return route
 
+    def _after_understand(state: PipelineState) -> str:
+        # Order matters: `waiting_clarification` is itself a halt status, and `clarify` is
+        # the node that emits the step explaining what is missing. Checking the halt first
+        # would end the run without ever saying why.
+        if state.get('status') == 'waiting_clarification':
+            return 'clarify'
+        return END if _halted(state) else 'schedules'
+
     graph.add_conditional_edges(
         'understand',
-        lambda s: 'clarify' if s.get('status') == 'waiting_clarification' else 'schedules',
-        {'clarify': 'clarify', 'schedules': 'schedules'},
+        _after_understand,
+        {'clarify': 'clarify', 'schedules': 'schedules', END: END},
     )
     graph.add_edge('clarify', END)
-    graph.add_edge('schedules', 'rates')
-    graph.add_edge('rates', 'rfq')
-    graph.add_edge('rfq', 'supplier_quotes')
+    # Every remaining hop is conditional on "not halted", not a plain edge. A plain edge
+    # here is how a failure at `understand` used to keep running schedules, rates, rfq and
+    # supplier_quotes, each failing in turn, and report the *last* failure as the cause --
+    # so a missing inquiry was diagnosed as a missing RFQ.
+    for source, target in (('schedules', 'rates'), ('rates', 'rfq'), ('rfq', 'supplier_quotes'),
+                           ('optimize', 'hitl_review')):
+        graph.add_conditional_edges(source, _next(target), {target: target, END: END})
     graph.add_conditional_edges('supplier_quotes', _next('optimize'),
                                 {'optimize': 'optimize', END: END})
-    graph.add_edge('optimize', 'hitl_review')
     graph.add_conditional_edges('hitl_review', _next('quote_send'),
                                 {'quote_send': 'quote_send', END: END})
     graph.add_conditional_edges('quote_send', _next('booking'),

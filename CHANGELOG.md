@@ -78,12 +78,23 @@ README 里的路由数、表/索引数、只读工具数，CHANGELOG 里的节�
   等于没有可观测性。补上 `app/services/metrics.py` 与 `/api/v1/metrics/agent`。
 - **节点耗时缺失**：`steps` 只记「发生了什么」，不记「花了多久」，因此无法回答延迟问题。
   计时移到 `_guarded` 包装器，失败路径一并计时。
+- **启动钩子仍在 `create_all`**：引导脚本改到 alembic 之后，`app/main.py` 的启动钩子
+  还留着 `Base.metadata.create_all(engine)`。`create_all` 只补建缺失的表、从不给已有表
+  加列，所以任何新增列的迁移都会让旧库静默缺列（症状是 `no such column: agent_runs.prompt_tokens`），
+  并且它建出的库没有 `alembic_version` 行，使 `alembic upgrade head` 死在
+  `table agent_runs already exists`——用来修的手段被造成问题的东西挡住。
+  现在启动只做检查（`app/schema_guard.py`），不在 head 就拒绝启动并给出修复命令；
+  `tests/test_schema_guard.py` 用 AST 断言 `main.py` 不再出现 `create_all`。
+- **节点失败后图继续往下跑**：`understand` 失败后，`schedules`/`rates`/`rfq`/`supplier_quotes`
+  依次继续执行并各自失败，最后上报的原因是**最后一个**失败（`supplier_quotes:rfq_missing`），
+  于是一个「询价单不存在」被诊断成「RFQ 缺失」。中段四条普通边改为条件边，
+  失败即在第一个失败节点终止并上报该节点。这个缺陷是**跑真实服务**时发现的，测试此前没有覆盖。
 
 ### 指标
 
 | 项目 | 1.0.0-rc3 | 2.0.0-rc1 |
 |---|---|---|
-| 测试 | 189 | **259** |
+| 测试 | 189 | **266** |
 | 覆盖率（整体） | 85% | **82%**（新增约 900 行 Agent 代码，新模块自身 88%） |
 | API 路由 | 43 | **52** |
 | 数据表 / 索引 | 20 / 35 | **23 / 41** |

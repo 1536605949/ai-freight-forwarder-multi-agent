@@ -5,7 +5,8 @@ from fastapi import FastAPI,Depends,HTTPException,Request,Header
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
-from app.db import Base,engine,get_db
+from app.db import engine,get_db
+from app.schema_guard import ensure_schema
 from app.auth import current_principal,Principal,require_role
 from app.schemas import (
     AgentAskIn, ApprovalIn, BookingCreate, CRMActivityCreate, FollowUpCreate, GraphResumeIn,
@@ -56,7 +57,12 @@ if get_settings().environment != 'production':
 
 @app.on_event('startup')
 def startup():
-    if get_settings().environment != 'production': Base.metadata.create_all(engine)
+    # Was `Base.metadata.create_all(engine)` outside production. That created the last
+    # second source of truth for the schema and, because create_all never adds a column to
+    # an existing table, silently left older databases without newly migrated columns --
+    # which surfaced as `no such column` 500s rather than as a schema error. See
+    # app/schema_guard.py. Refusing to boot is the better failure.
+    ensure_schema(engine)
 
 @app.middleware('http')
 async def request_meta(req:Request,call_next):

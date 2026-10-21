@@ -210,6 +210,20 @@ def check_observability(c: Client) -> bool:
     check('仪表盘可读', r.status_code == 200, f'status={r.status_code}')
     check('  审计事件已累积', (j.get('audit_events') or 0) > 0, f'audit_events={j.get("audit_events")}')
     check('  Agent 运行记录已累积', (j.get('agent_runs') or 0) > 0, f'agent_runs={j.get("agent_runs")}')
+
+    # The latency/cost endpoint reads what the runtime records. Asserting the shape here
+    # rather than in a unit test is deliberate: the numbers only exist if a real run wrote
+    # them, so a mocked test can pass while the endpoint is empty in a running system.
+    r = c.get('/api/v1/metrics/agent?days=7', H_SALES)
+    m = r.json() if r.status_code == 200 else {}
+    check('Agent 度量接口可读', r.status_code == 200, f'status={r.status_code}')
+    check('  含耗时与成本两块', {'agents', 'graph'} <= set(m), f'keys={sorted(m)}')
+    nodes = (m.get('graph') or {}).get('nodes') or []
+    check('  节点耗时有样本', any(n.get('samples') for n in nodes),
+          f'nodes={[(n.get("node"), n.get("samples")) for n in nodes]}')
+    check('  未上报用量单独计数（不折算成 0）',
+          'unreported_runs' in ((m.get('agents') or {}).get('tokens') or {}),
+          f'tokens={(m.get("agents") or {}).get("tokens")}')
     return True
 
 

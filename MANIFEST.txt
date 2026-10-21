@@ -54,6 +54,7 @@
 ./app/providers/schedule.py
 ./app/providers/tracking.py
 ./app/providers/vessel.py
+./app/schema_guard.py
 ./app/schemas.py
 ./app/services/__init__.py
 ./app/services/approval.py
@@ -151,6 +152,7 @@
 ./tests/test_rate_crm_growth.py
 ./tests/test_rates.py
 ./tests/test_schedule.py
+./tests/test_schema_guard.py
 ./tests/test_state_machine.py
 ./tests/test_supplier_email_parser.py
 ./tests/test_tenant_isolation.py

@@ -164,12 +164,12 @@ q.missing_fields=...; q.status=NEEDS_CLARIFICATION if q.missing_fields else READ
 | 运价体系 | 合约价 / 指数 / 合成三实现，带来源与有效期 |
 | 统一编排 | 10 阶段 + 2 闸门 + 4 条路由，17 条测试 |
 | 演示体系 | 总览页（含闸门交互）+ 获客页 + 最简页，11 条契约测试 |
-| 启动与验收 | `bootstrap_dev.py`（幂等）+ `delivery_check.py`（40 项检查） |
+| 启动与验收 | `bootstrap_dev.py`（幂等）+ `delivery_check.py`（44 项检查） |
 | 质量基线 | ~~99 测试 / 71% / ruff 新文件零告警~~ → **179 测试全绿，83% 覆盖，ruff 全仓零告警**（规则集显式声明于 `pyproject.toml`） |
 
 ### 进行中
 
-无。Task #13（端到端验收）已完成，40/40 项检查通过。
+无。Task #13（端到端验收）已完成，44/44 项检查通过。
 
 ### 未开始 / 仅骨架
 
@@ -446,6 +446,7 @@ app/agents/         tools.py（只读工具注册表，分发路径上拒绝写�
                     tool_loop.py（有界循环 + 确定性策略 + 脚本策略）
                     resilience.py（超时 / 只重试瞬态故障 / token 与成本）
 app/services/       metrics.py（把上面记下来的延迟、token、成本读回来）
+app/schema_guard.py  启动时校验 alembic 是否在 head，不在就拒绝启动
 ```
 
 ### 三个必须说清楚的设计取舍
@@ -476,12 +477,20 @@ app/services/       metrics.py（把上面记下来的延迟、token、成本读
 | N4 | 迁移 AST 检查只扫第一个版本文件 | 检查本身会空转 |
 | N5 | `latency_ms` / `prompt_tokens` / `cost_usd` 只写不读，`steps` 不含耗时 | 可观测性是列名，不是能力 |
 | N6 | README 的路由数、CHANGELOG 的节点数无人校验（节点数实际 11，两处分别写 12 和 10） | 文档里的数字没有守卫 |
+| N7 | 启动钩子仍 `create_all`：只补表不加列，且建出的库 alembic 无法接管 | 最后一个第二真相来源 |
+| N8 | 节点失败后中段四条普通边继续执行，上报的是最后一个失败而非根因 | 诊断被级联污染 |
 
 N1 与 N2 属于同一类：**默认值站在「能跑通」那一侧**。这也是历次复核里命中率最高的模式。
 
 N5 与 N6 也属于同一类：**声明与执行不一致**。字段存在但没人读，等于没有这个能力；
 文档里的数字没人校验，就等于修辞。两者的处理方式相同——补上读取方，并让它在漂移时失败
 （`app/services/metrics.py`、`tests/test_doc_claims.py`，后者已用变异测试验证过会红）。
+
+N7 与 N8 是**跑真实服务**才暴露的：259 个测试全绿，`uvicorn` 起来第一个请求就 500
+（`no such column`），修好 schema 后又发现一个不存在的询价单号会跑完五个节点并上报
+错误的根因。测试覆盖的是「我以为的路径」，服务跑的是「实际的路径」。
+结论写进流程：**新增对外接口后必须用真实进程打一次**，`scripts/delivery_check.py`
+之所以是 44 项而不是单元测试的重复，就是为了这个。
 
 ### 新增的诚实边界
 

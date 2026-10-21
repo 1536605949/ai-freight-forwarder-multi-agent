@@ -178,3 +178,44 @@ async def test_graph_run_is_persisted_with_a_cursor(db):
     assert rows[0].id == run.run_id
     assert rows[0].thread_id == run.thread_id
     assert rows[0].steps[-1]['node'] == 'hitl_review'
+
+
+@pytest.mark.asyncio
+async def test_a_failed_node_stops_the_run_instead_of_cascading(db):
+    """One failure must end the run, and the run must report *that* failure.
+
+    This is a regression test for a defect found by driving the real server, not by the
+    suite: `understand` failed with `inquiry_not_found`, and because the next four hops were
+    plain edges the graph went on to run schedules, rates, rfq and supplier_quotes, each
+    failing in turn. The reported stop reason was the *last* failure
+    (`supplier_quotes:rfq_missing`), so an operator would have investigated the RFQ for a
+    missing inquiry.
+
+    Two assertions, because the count and the reason are separate failures: running four
+    nodes that cannot possibly succeed wastes work and pollutes the trace; reporting the
+    wrong cause sends the investigation to the wrong place.
+    """
+    run = await run_graph(db, 'tenant-demo', 'u', 't', 'inq_does_not_exist')
+
+    assert run.status == 'failed'
+    assert [s['node'] for s in run.steps] == ['understand']
+    assert run.stop_reason.startswith('understand:'), (
+        f'the first failure is the cause; got {run.stop_reason!r}'
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_failure_after_a_successful_node_still_stops_the_next_hop(db):
+    """The cascade guard is not specific to `understand`.
+
+    `supplier_quotes` is reached through a plain edge from `rfq`; a refusal there must end
+    the run before `optimize` prices on zero quotes.
+    """
+    _seed(db)
+    run = await run_graph(db, 'tenant-demo', 'u', 't', 'inq_graph',
+                          allow_synthetic_quotes=False)
+
+    nodes = [s['node'] for s in run.steps]
+    assert run.status == 'waiting_supplier_quotes'
+    assert nodes == ['understand', 'schedules', 'rates', 'rfq', 'supplier_quotes']
+    assert 'optimize' not in nodes
