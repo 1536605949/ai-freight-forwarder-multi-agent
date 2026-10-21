@@ -1,5 +1,5 @@
-from pydantic import BaseModel, EmailStr, Field
-from typing import Any
+from pydantic import BaseModel, EmailStr, Field, model_validator
+from typing import Any, Literal
 
 class LeadCreate(BaseModel):
     company:str; contact_name:str|None=None; email:EmailStr|None=None; country:str|None=None; industry:str|None=None; source:str='manual'; trade_lane:str|None=None; consent_status:str='unknown'; notes:str|None=None
@@ -26,6 +26,27 @@ class SupplierInboundEmail(BaseModel):
 class ProspectSearchIn(BaseModel):
     lane:str=Field(min_length=2,max_length=160); industry:str|None=None
     limit:int|None=Field(default=None,ge=1,le=200); dry_run:bool=False
+
+class ProspectImportIn(BaseModel):
+    """A purchased or exported list, not a search result.
+
+    `source` and `data_origin` are required and non-trivial: a list whose provenance nobody
+    can name is exactly the list that cannot be lawfully emailed, so it is refused at the
+    door rather than stored and sorted out later.
+    """
+    source:str=Field(min_length=2,max_length=80)
+    data_origin:str=Field(min_length=2,max_length=80)
+    contract_ref:str|None=Field(default=None,max_length=200)
+    format:Literal['json','csv']='json'
+    rows:list[dict[str,Any]]|None=None
+    content:str|None=None
+    default_lane:str|None=Field(default=None,max_length=160)
+
+    @model_validator(mode='after')
+    def _payload_matches_format(self):
+        if self.format=='json' and not self.rows: raise ValueError('rows_required_for_json')
+        if self.format=='csv' and not (self.content or '').strip(): raise ValueError('content_required_for_csv')
+        return self
 
 class PromoteIn(BaseModel):
     consent_status:str=Field(pattern='^(opt_in|legitimate_interest_reviewed|unknown)$')

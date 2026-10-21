@@ -12,7 +12,7 @@ from app.schemas import (
     AgentAskIn, ApprovalIn, BookingCreate, CRMActivityCreate, FollowUpCreate, GraphResumeIn,
     GraphRunIn, InboundMessage, InquiryPatch, KnowledgeDocumentIn, KnowledgeQueryIn, LeadCreate,
     OptOutIn, OrchestrateContinueIn, OrchestrateIn, OutreachApproveIn, OutreachDraftIn,
-    PromoteIn, ProspectSearchIn, SupplierInboundEmail, SupplierQuoteIn, TrackingWebhook,
+    PromoteIn, ProspectImportIn, ProspectSearchIn, SupplierInboundEmail, SupplierQuoteIn, TrackingWebhook,
 )
 from app.services.lead import create_lead
 from app.services.inquiry import ingest_message,patch_inquiry
@@ -91,6 +91,15 @@ async def api_lead_outreach(lead_id:str,request:Request,db:Session=Depends(get_d
 async def api_prospect_search(x:ProspectSearchIn,request:Request,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):
     return await prospecting_svc.search_prospects(db,p.tenant_id,p.user_id,request.state.trace_id,x.lane,x.industry,x.limit,x.dry_run)
 
+# Importing a purchased list is a different act from searching a live source: the caller
+# must name the vendor and the contract, because an unattributable list cannot be lawfully
+# emailed. Registered before the `{prospect_id}` routes so `import` is never read as an id.
+@app.post('/api/v1/prospects/import')
+def api_prospect_import(x:ProspectImportIn,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):
+    rows=x.rows if x.format=='json' else prospecting_svc.parse_csv(x.content or '')
+    return prospecting_svc.import_prospects(db,p.tenant_id,p.user_id,source=x.source,
+        data_origin=x.data_origin,rows=rows or [],contract_ref=x.contract_ref,default_lane=x.default_lane)
+
 @app.get('/api/v1/prospects')
 def api_prospects(status:str|None=None,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):
     q=db.query(ProspectCandidate).filter_by(tenant_id=p.tenant_id)
@@ -107,6 +116,12 @@ def api_prospect(prospect_id:str,db:Session=Depends(get_db),p:Principal=Depends(
 def api_prospect_evidence(prospect_id:str,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):
     try:return prospecting_svc.prospect_evidence(db,p.tenant_id,prospect_id)
     except KeyError:raise HTTPException(404,'not found')
+
+@app.post('/api/v1/prospects/{prospect_id}/score')
+async def api_prospect_score(prospect_id:str,request:Request,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):
+    try:return await prospecting_svc.score_prospect(db,p.tenant_id,p.user_id,request.state.trace_id,prospect_id)
+    except KeyError:raise HTTPException(404,'not found')
+    except ValueError as e:raise HTTPException(409,str(e))
 
 @app.post('/api/v1/prospects/{prospect_id}/enrich')
 async def api_prospect_enrich(prospect_id:str,request:Request,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):

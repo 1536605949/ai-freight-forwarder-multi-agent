@@ -86,6 +86,7 @@
 ./deployment/.env.example
 ./deployment/docker-compose.yml
 ./deployment/nginx.conf
+./docs/ACQUISITION_PLAYBOOK.md
 ./docs/AGENT_DESIGN.md
 ./docs/ARCHITECTURE.md
 ./docs/ARCHITECTURE_LAYERS.md

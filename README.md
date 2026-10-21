@@ -24,7 +24,7 @@ python scripts/bootstrap_dev.py          # 建 venv + 装依赖 + alembic upgrad
 python -m uvicorn app.main:app --port 8100
 
 # 另开一个终端：
-pytest -q                                # 单元 + 集成：306 passed
+pytest -q                                # 单元 + 集成：317 passed
 python evaluation/run_eval.py            # 行为评测：6/6 通过
 python evaluation/knowledge_eval.py      # 检索评测：hit@3 95.5%，负例误答 0/12
 python scripts/delivery_check.py         # 交付验收：44/44 通过
@@ -50,13 +50,13 @@ curl -s localhost:8100/api/v1/graph/run -H 'content-type: application/json' \
 
 | 项目 | 结果 | 复现命令 |
 |---|---|---|
-| 单元 / 集成测试 | **306 passed** | `pytest -q` |
+| 单元 / 集成测试 | **317 passed** | `pytest -q` |
 | 覆盖率 | **82%** 整体；v2.0 新增模块 **88%** | `pytest --cov=app --cov=worker --cov=evaluation` |
 | 静态检查 | **ruff 全绿**（规则集见 `pyproject.toml`） | `ruff check app tests worker evaluation scripts` |
 | 行为评测 | **6/6**，全部真实执行 | `python evaluation/run_eval.py` |
 | SOP 检索评测 | **hit@1 90.9% / hit@3 95.5% / 负例误答 0** | `python evaluation/knowledge_eval.py` |
 | 交付验收 | **44/44** | `python scripts/delivery_check.py` |
-| API 路由 | **55** | `GET /docs` |
+| API 路由 | **57** | `GET /docs` |
 | 度量口径 | `GET /api/v1/metrics/agent`（p50/p95、token、成本、闸门分布） | 见下方「可观测性」 |
 | 数据表 / 索引 | **23 / 41** | `alembic upgrade head` |
 | 模块循环依赖 | **0** | `tests/test_architecture_asset.py` |
@@ -410,6 +410,26 @@ ProspectingSource (可插拔)
 规则 → 强制点 → 测试的完整对照见 [`docs/OUTREACH_COMPLIANCE.md`](docs/OUTREACH_COMPLIANCE.md)，
 同类项目调研见 [`docs/GITHUB_LANDSCAPE.md`](docs/GITHUB_LANDSCAPE.md)。
 
+**数据怎么进来**（真实获客的第一步，不是搜索而是导入）：
+
+```bash
+# 数据商给的是 CSV 导出，不是一个 REST API
+curl -X POST http://localhost:8100/api/v1/prospects/import \
+  -d '{"source":"tradesns","data_origin":"vendor_contract_2026","format":"csv",
+       "content":"公司,国家,行业,货量,邮箱\n铁杉贸易,德国,机械,260,ops@tsuga.test\n"}'
+# → {"accepted":1,"rejected":0,"reasons":{}}
+
+curl -X POST http://localhost:8100/api/v1/prospects/prs_xxx/score
+# → {"verdict":"qualified","score":90.0}
+```
+
+- `source` / `data_origin` **必填**——一份说不出从哪来的名单，正是不能合法发信的那份。
+- 表头做映射（`Est Volume TEU` / `teu` / `货量` 同义），否则货量静默变 `None`、被打成低货量线索。
+- 双键去重：`(source, source_ref)` 防重导，`(归一化公司名, 邮箱)` 防两家供应商买到同一家。
+- **导入 ≠ 合格**：落库是 `status=imported` / `score=0`，评分下限直接挡住群发。
+
+六类数据源、四条已知缺口见 [`docs/ACQUISITION_PLAYBOOK.md`](docs/ACQUISITION_PLAYBOOK.md)。
+
 > **数据来源合规**：中国大陆海关提单数据不对普通企业开放，仅可通过持牌数据商获取；
 > AIS 船位为付费授权数据。仓库内 `MockProspectingSource` 与 mock AIS 均为**合成数据**，
 > 仅供演示（`data_origin=mock_synthetic`）。生产接入须取得相应许可，不得爬取。
@@ -502,7 +522,7 @@ export OPENAI_CHAT_MODEL=...
 
 ```
 app/
-  main.py            55 条路由；鉴权、错误码映射、demo 页面挂载
+  main.py            57 条路由；鉴权、错误码映射、demo 页面挂载
   state_machine.py   InquiryStatus 迁移图 + advance_status()（唯一真相来源）
   enums.py           状态词汇表
   models.py          23 张表（全部带 tenant_id）
@@ -523,7 +543,7 @@ worker/scheduler.py  跟进任务轮询（支持 --once 用于 cron）
 evaluation/          行为评测（run_eval.py）+ 检索评测（knowledge_eval.py）
 migrations/          Alembic；0001/0002 均为显式冻结快照
 demo_client/         静态演示页
-tests/               306 个测试
+tests/               317 个测试
 docs/                架构、分层、集成、交付、审查文档
 ```
 
@@ -619,6 +639,7 @@ revision），并用 AST 扫过 `app/`、`worker/`、`scripts/` 全部文件，�
 | [`docs/AGENT_DESIGN.md`](docs/AGENT_DESIGN.md) | Agent 边界与提示词策略 |
 | [`docs/UI_DESIGN.md`](docs/UI_DESIGN.md) | 演示界面：现状评估、优化方案、每个页面的功能区与交互流程 |
 | [`docs/OUTREACH_COMPLIANCE.md`](docs/OUTREACH_COMPLIANCE.md) | 获客外联：规则 → 强制点 → 测试三列对照 |
+| [`docs/ACQUISITION_PLAYBOOK.md`](docs/ACQUISITION_PLAYBOOK.md) | 获客数据从哪来：六类数据源、三条进入路径、四个坑与对策 |
 | [`docs/GITHUB_LANDSCAPE.md`](docs/GITHUB_LANDSCAPE.md) | 同类项目调研：检索记录、可借鉴清单、方法局限 |
 | [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md) | 外部系统接入（含运价数据的硬约束） |
 | [`docs/DELIVERY_STEP1.md`](docs/DELIVERY_STEP1.md) | 第一步交付状态与验收口径 |

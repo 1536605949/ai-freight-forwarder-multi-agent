@@ -150,16 +150,26 @@ def _mock_prospecting(text:str)->dict[str,Any]:
         ind=(c.get('industry') or '').lower()
         vol=c.get('est_volume_teu') or 0
         # Transparent heuristic: manufactured goods move better on container lanes than bulk-only trades.
+        # Both languages, because an imported list often carries 机械 where a searched one carries
+        # Machinery. Matching only English scored the Chinese row 25 points lower and then printed
+        # "行业 机械 与集装箱航线匹配" next to the lower number -- a rationale contradicting its
+        # own score, which is worse than a wrong score because nobody questions it.
+        fits_container=any(k in ind for k in (
+            'appliance','auto','furniture','textile','electronic','machinery','toy','building',
+            '家电','汽车','配件','家具','纺织','电子','机械','玩具','建材'))
         fit=40.0
-        if any(k in ind for k in ['appliance','auto','furniture','textile','electronic','machinery','toy','building']): fit+=25
+        if fits_container: fit+=25
         if vol>=300: fit+=20
         elif vol>=100: fit+=12
         elif vol>0: fit+=5
         if c.get('country'): fit+=5
         fit=min(round(fit,1),100)
         if fit>=55:
+            # The reason must account for the number next to it. Saying "matches the container
+            # lane" for a bulk-only industry was a second, quieter defect than the score itself.
+            trade=('与集装箱航线匹配' if fits_container else '不是典型集装箱货类')
             qualified.append({'company':company,'fit_score':fit,
-                'reason':f'行业 {c.get("industry") or "未知"} 与集装箱航线匹配；已知货量约 {vol} TEU/年。',
+                'reason':f'行业 {c.get("industry") or "未知"} {trade}；已知货量约 {vol} TEU/年。',
                 'suggested_angle':f'以 {(lane or "该航线")} 的舱位保障与目的港清关协同为切入点。'})
         else:
             excluded.append({'company':company,'reason':'行业适箱性或已知货量不足，优先度低。'})

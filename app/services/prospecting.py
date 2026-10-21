@@ -8,6 +8,10 @@ The compliance gates below are deliberately NOT prompt instructions. A model mus
 the thing standing between a business and a privacy violation.
 """
 from __future__ import annotations
+import csv
+import hashlib
+import io
+import re
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
 from sqlalchemy.orm import Session
@@ -66,6 +70,166 @@ async def search_prospects(db:Session,tenant_id:str,actor:str,trace_id:str,lane:
     db.commit()
     for p in saved: db.refresh(p)
     return {'lane':lane,'discovered':len(records),'qualified':len(saved),'prospects':[_row(p) for p in saved]}
+
+
+def _norm_company(name:str)->str:
+    """Fold a company name to compare across vendors.
+
+    Two data vendors spell the same shipper differently ("Meridian Trading Co., Ltd" vs
+    "MERIDIAN TRADING"). Exact-string matching would import the same company twice and then
+    email it twice, which is the one thing this module exists to prevent. This is a
+    normalisation, not entity resolution -- see the known gap in docs/ACQUISITION_PLAYBOOK.md.
+    """
+    return re.sub(r'[^a-z0-9]','',(name or '').lower())
+
+
+# Real exports do not use our column names. "Est Volume TEU", "Annual TEU", "货量" and "teu"
+# are the same field; without a mapping the volume silently imports as None, which then
+# scores as a low-volume lead -- a wrong answer that looks like a data problem.
+_HEADER_ALIASES={
+    'company':'company','company name':'company','shipper':'company','公司':'company','企业':'company','公司名称':'company',
+    'country':'country','market':'country','国家':'country',
+    'industry':'industry','sector':'industry','行业':'industry',
+    'est_volume_teu':'est_volume_teu','est volume teu':'est_volume_teu','est_volume':'est_volume_teu',
+    'annual teu':'est_volume_teu','volume':'est_volume_teu','teu':'est_volume_teu','货量':'est_volume_teu',
+    'email':'email','e-mail':'email','mail':'email','邮箱':'email',
+    'contact':'contact_name','contact name':'contact_name','联系人':'contact_name',
+    'title':'contact_title','job title':'contact_title',
+    'phone':'phone','tel':'phone','telephone':'phone','电话':'phone',
+    'website':'website','site':'website','url':'website','网址':'website',
+    'trade_lane':'trade_lane','lane':'trade_lane','route':'trade_lane','航线':'trade_lane',
+    'source_ref':'source_ref','id':'source_ref','record id':'source_ref',
+}
+
+
+def _field_name(raw:str)->str:
+    k=(raw or '').strip()
+    if not k: return ''
+    low=k.lower()
+    if low in _HEADER_ALIASES: return _HEADER_ALIASES[low]
+    norm=re.sub(r'[^a-z0-9]+','_',low).strip('_')
+    return _HEADER_ALIASES.get(norm,norm)
+
+
+def parse_csv(content:str)->list[dict]:
+    """Header row is the field map; unknown columns are ignored by the cleaner."""
+    reader=csv.DictReader(io.StringIO(content))
+    return [{_field_name(k):(v or '').strip() for k,v in row.items()} for row in reader]
+
+
+def _clean_row(row:dict,default_lane:str|None)->tuple[dict,str|None]:
+    """Normalise one imported row, or say why it cannot be stored."""
+    def g(k:str)->str:
+        v=row.get(k)
+        return '' if v is None else str(v).strip()
+
+    company=g('company')
+    if not company: return {},'missing_company'
+
+    email=g('email').lower() or None
+    if email and ('@' not in email or email.endswith('@') or ' ' in email):
+        return {},'bad_email'
+
+    volume=g('est_volume_teu')
+    try: volume=float(volume) if volume else None
+    except ValueError: volume=None
+
+    return {'company':company[:200],'country':g('country')[:80] or None,
+        'industry':g('industry')[:120] or None,'website':g('website')[:300] or None,
+        'trade_lane':(g('trade_lane') or default_lane or '')[:160] or None,
+        'est_volume_teu':volume,'contact_name':g('contact_name')[:160] or None,
+        'contact_title':g('contact_title')[:160] or None,'email':email,
+        'phone':g('phone')[:80] or None,'source_ref':g('source_ref')[:200] or None},None
+
+
+def import_prospects(db:Session,tenant_id:str,actor:str,*,source:str,data_origin:str,rows:list[dict],
+                     contract_ref:str|None=None,default_lane:str|None=None)->dict:
+    """Bring a purchased or exported list into the candidate pool.
+
+    Import is **not** qualification. Rows land as `status='imported'` with `score=0`, and the
+    score floor at send time means an unscored list cannot be emailed until it has been
+    scored one candidate at a time. That is the whole point: buying a list must not become a
+    licence to blast it.
+
+    Dedupe is on two keys, because purchased lists duplicate in two different ways:
+      - `(source, source_ref)` -- re-importing the same export is a no-op;
+      - `(normalised company, email)` -- the same shipper bought from two vendors is one
+        company. Same company with a *different* email is kept: that is a second contact,
+        not a duplicate.
+    """
+    reasons:dict[str,int]={}
+    accepted:list[ProspectCandidate]=[]
+    seen:set[tuple[str,str]]=set()
+
+    existing=db.query(ProspectCandidate.company,ProspectCandidate.email,
+        ProspectCandidate.source,ProspectCandidate.source_ref).filter_by(tenant_id=tenant_id).all()
+    refs={(s,r) for _,_,s,r in existing if r}
+    identities={(_norm_company(c),(e or '').lower()) for c,e,_,_ in existing}
+
+    def reject(why:str)->None: reasons[why]=reasons.get(why,0)+1
+
+    for raw in rows:
+        row,why=_clean_row(raw,default_lane)
+        if why: reject(why); continue
+
+        identity=(_norm_company(row['company']),(row['email'] or '').lower())
+        if identity in identities: reject('duplicate'); continue
+        ref=row['source_ref'] or hashlib.sha256(f'{identity[0]}|{identity[1]}'.encode('utf-8')).hexdigest()[:16]
+        if (source,ref) in refs or (source,ref) in seen: reject('duplicate'); continue
+
+        seen.add((source,ref)); identities.add(identity)
+        p=ProspectCandidate(id=uid('prs_'),tenant_id=tenant_id,company=row['company'],
+            country=row['country'],industry=row['industry'],website=row['website'],
+            trade_lane=row['trade_lane'],est_volume_teu=row['est_volume_teu'],
+            source=source,source_ref=ref,data_origin=data_origin,
+            raw_payload={'row':raw,'contract_ref':contract_ref},
+            status='imported',score=0,contact_name=row['contact_name'],
+            contact_title=row['contact_title'],email=row['email'],phone=row['phone'])
+        db.add(p); accepted.append(p)
+
+    rejected=sum(reasons.values())
+    audit(db,tenant_id,actor,'prospect.imported','source',source,
+        {'data_origin':data_origin,'contract_ref':contract_ref,'accepted':len(accepted),
+         'rejected':rejected,'reasons':reasons})
+    db.commit()
+    for p in accepted: db.refresh(p)
+    return {'source':source,'data_origin':data_origin,'accepted':len(accepted),'rejected':rejected,
+        'reasons':reasons,'prospects':[_row(p) for p in accepted]}
+
+
+async def score_prospect(db:Session,tenant_id:str,actor:str,trace_id:str,prospect_id:str)->dict:
+    """Score one imported candidate so it can enter (or be kept out of) the outreach queue.
+
+    Imported rows start at `score=0`, which the send-time floor refuses. This is the step
+    that earns them a score. An agent verdict of "not worth contacting" is recorded as
+    `rejected` rather than left at zero -- a row sitting at 0 looks like "not scored yet"
+    forever, and nobody cleans those up.
+    """
+    p=db.query(ProspectCandidate).filter_by(id=prospect_id,tenant_id=tenant_id).first()
+    if not p: raise KeyError('prospect_not_found')
+
+    payload={'lane':p.trade_lane or '','industry':p.industry,'candidates':[{
+        'company':p.company,'country':p.country,'industry':p.industry,'website':p.website,
+        'trade_lane':p.trade_lane,'est_volume_teu':p.est_volume_teu,'source':p.source}]}
+    data=(await run_agent(db,tenant_id,trace_id,'prospecting',payload,True)).data or {}
+
+    qualified=next((q for q in data.get('qualified',[]) if q.get('company')==p.company),None)
+    excluded=next((e for e in data.get('excluded',[]) if e.get('company')==p.company),None)
+
+    if qualified:
+        p.score=float(qualified.get('fit_score') or 0); p.score_rationale=qualified.get('reason')
+        p.status='discovered'; verdict='qualified'
+    elif excluded:
+        p.score=0; p.score_rationale=excluded.get('reason'); p.status='rejected'; verdict='excluded'
+    else:
+        # Not "score 0". The agent returned nothing usable, which is a different failure and
+        # must not be laundered into a low score.
+        raise ValueError('agent_returned_no_verdict')
+
+    audit(db,tenant_id,actor,'prospect.scored','prospect',p.id,
+        {'verdict':verdict,'score':p.score,'reason':p.score_rationale})
+    db.commit(); db.refresh(p)
+    return {'prospect':_row(p),'verdict':verdict,'score':p.score,'rationale':p.score_rationale}
 
 
 async def enrich_prospect(db:Session,tenant_id:str,actor:str,trace_id:str,prospect_id:str)->dict:
