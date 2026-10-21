@@ -24,7 +24,7 @@ python scripts/bootstrap_dev.py          # 建 venv + 装依赖 + alembic upgrad
 python -m uvicorn app.main:app --port 8100
 
 # 另开一个终端：
-pytest -q                                # 单元 + 集成：318 passed
+pytest -q                                # 单元 + 集成：325 passed
 python evaluation/run_eval.py            # 行为评测：6/6 通过
 python evaluation/knowledge_eval.py      # 检索评测：hit@3 95.5%，负例误答 0/12
 python scripts/delivery_check.py         # 交付验收：44/44 通过
@@ -50,7 +50,7 @@ curl -s localhost:8100/api/v1/graph/run -H 'content-type: application/json' \
 
 | 项目 | 结果 | 复现命令 |
 |---|---|---|
-| 单元 / 集成测试 | **318 passed** | `pytest -q` |
+| 单元 / 集成测试 | **325 passed** | `pytest -q` |
 | 覆盖率 | **82%** 整体；v2.0 新增模块 **88%** | `pytest --cov=app --cov=worker --cov=evaluation` |
 | 静态检查 | **ruff 全绿**（规则集见 `pyproject.toml`） | `ruff check app tests worker evaluation scripts` |
 | 行为评测 | **6/6**，全部真实执行 | `python evaluation/run_eval.py` |
@@ -428,7 +428,21 @@ curl -X POST http://localhost:8100/api/v1/prospects/prs_xxx/score
 - 双键去重：`(source, source_ref)` 防重导，`(归一化公司名, 邮箱)` 防两家供应商买到同一家。
 - **导入 ≠ 合格**：落库是 `status=imported` / `score=0`，评分下限直接挡住群发。
 
-六类数据源、四条已知缺口见 [`docs/ACQUISITION_PLAYBOOK.md`](docs/ACQUISITION_PLAYBOOK.md)。
+**中国海关数据的两件特殊事**（只做中国起运时必然遇到）：
+
+- **一行两个主体**：`出口商` + `采购商`。谁是线索取决于你卖什么，所以由调用方选边——
+  `entity_side: "exporter"`（默认，卖中国起运）或 `"importer"`（卖进中国）；
+  另一边存为 `counterparty`，HS / 金额 / 数量 / 日期原样存进 `shipment_facts`。
+- **没有邮箱**。导入结果直接给 `contact_gaps: {emailable, no_email, no_contact_name}`，
+  全都没邮箱时附一句说明——「买了 1 万家客户」和「能给 1 万家发信」之间隔着整个富化环节，
+  这个数字要在付钱之前看到，而不是在起草时一条条撞墙。
+
+> 公司名归一化必须保留非 ASCII 字符。此前用 `[^a-z0-9]` 折叠，**所有中文公司名都变成空串**，
+> 第二家中国公司会被当成第一家的重复项**静默丢弃**——导一份真实中文 CSV 才暴露出来。
+
+Panjiva 怎么获取、中国侧数据源、只买中国模块怎么谈、合同必须写的八条，见
+[`docs/DATA_SOURCING_CN.md`](docs/DATA_SOURCING_CN.md)；
+六类数据源与四条已知缺口见 [`docs/ACQUISITION_PLAYBOOK.md`](docs/ACQUISITION_PLAYBOOK.md)。
 
 > **数据来源合规**：中国大陆海关提单数据不对普通企业开放，仅可通过持牌数据商获取；
 > AIS 船位为付费授权数据。仓库内 `MockProspectingSource` 与 mock AIS 均为**合成数据**，
@@ -543,7 +557,7 @@ worker/scheduler.py  跟进任务轮询（支持 --once 用于 cron）
 evaluation/          行为评测（run_eval.py）+ 检索评测（knowledge_eval.py）
 migrations/          Alembic；0001/0002 均为显式冻结快照
 demo_client/         静态演示页
-tests/               318 个测试
+tests/               325 个测试
 docs/                架构、分层、集成、交付、审查文档
 ```
 
@@ -640,6 +654,7 @@ revision），并用 AST 扫过 `app/`、`worker/`、`scripts/` 全部文件，�
 | [`docs/UI_DESIGN.md`](docs/UI_DESIGN.md) | 演示界面：现状评估、优化方案、每个页面的功能区与交互流程 |
 | [`docs/OUTREACH_COMPLIANCE.md`](docs/OUTREACH_COMPLIANCE.md) | 获客外联：规则 → 强制点 → 测试三列对照 |
 | [`docs/ACQUISITION_PLAYBOOK.md`](docs/ACQUISITION_PLAYBOOK.md) | 获客数据从哪来：六类数据源、三条进入路径、四个坑与对策 |
+| [`docs/DATA_SOURCING_CN.md`](docs/DATA_SOURCING_CN.md) | 只做中国业务：Panjiva 获取路径、中国侧数据源、只买中国模块怎么谈、合同八条 |
 | [`docs/GITHUB_LANDSCAPE.md`](docs/GITHUB_LANDSCAPE.md) | 同类项目调研：检索记录、可借鉴清单、方法局限 |
 | [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md) | 外部系统接入（含运价数据的硬约束） |
 | [`docs/DELIVERY_STEP1.md`](docs/DELIVERY_STEP1.md) | 第一步交付状态与验收口径 |

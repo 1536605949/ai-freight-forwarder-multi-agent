@@ -375,3 +375,82 @@ def test_a_list_records_how_old_the_data_was(db):
         data_as_of='2099-01-01',rows=[_row(company='Future Ltd')])
     e3=ps.prospect_evidence(db,'tenant-demo',future['prospects'][0]['id'])
     assert e3['age_days'] is None, 'a future date is a data error, not freshness'
+
+
+# --- Chinese customs exports ------------------------------------------------------------
+# The shape that matters for a China-only deployment: every row has two parties and no
+# contact details at all. Both facts have to be visible at import time, because they change
+# what the list is worth.
+
+_CUSTOMS_CSV=('出口商,采购商,目的国,HS编码,商品,金额,数量,起运港,目的港,日期\n'
+              '宁波海隅机械有限公司,Meridian Trading LLC,United States,8479.89,机械零配件,182000,24,宁波,Los Angeles,2026-09-28\n'
+              '苏州澜川电子有限公司,Pacific Rim Imports Inc,United States,8542.31,集成电路,94000,12,上海,Long Beach,2026-09-30\n')
+
+
+def test_a_customs_row_keeps_both_parties_and_says_which_one_is_the_lead(db):
+    rows=ps.parse_csv(_CUSTOMS_CSV)
+    out=ps.import_prospects(db,'tenant-demo','u',source='tradesns',data_origin='cn_export_2026',
+        data_as_of='2026-09-30',rows=rows,default_lane='Ningbo -> Los Angeles')
+
+    assert out['accepted']==2, out['reasons']
+    assert out['entity_side']=='exporter'
+    names=[p['company'] for p in out['prospects']]
+    assert names==['宁波海隅机械有限公司','苏州澜川电子有限公司']
+
+    e=ps.prospect_evidence(db,'tenant-demo',out['prospects'][0]['id'])
+    assert e['counterparty']=='Meridian Trading LLC'
+    # Shipment facts are what make the row believable; losing them on import would leave a
+    # company name with nothing behind it.
+    assert e['shipment_facts']['hs_code']=='8479.89'
+    assert e['shipment_facts']['amount']=='182000'
+    assert e['shipment_facts']['record_date']=='2026-09-28'
+
+
+def test_the_same_export_can_be_read_from_the_buying_side(db):
+    out=ps.import_prospects(db,'tenant-demo','u',source='tradesns',data_origin='cn_export_2026',
+        rows=ps.parse_csv(_CUSTOMS_CSV),entity_side='importer')
+    assert [p['company'] for p in out['prospects']]==['Meridian Trading LLC','Pacific Rim Imports Inc']
+    e=ps.prospect_evidence(db,'tenant-demo',out['prospects'][0]['id'])
+    assert e['counterparty']=='宁波海隅机械有限公司'
+
+
+def test_an_import_with_no_email_says_so_instead_of_looking_successful(db):
+    """The honest headline for a Chinese customs list: 2 rows, 0 of them emailable.
+
+    Without this, the operator learns it one candidate at a time, at draft time, after
+    paying for the subscription.
+    """
+    out=ps.import_prospects(db,'tenant-demo','u',source='tradesns',data_origin='cn_export_2026',
+        rows=ps.parse_csv(_CUSTOMS_CSV))
+
+    assert out['contact_gaps']=={'emailable':0,'no_email':2,'no_contact_name':2}
+    assert '没有邮箱' in (out['note'] or '')
+
+    e=ps.prospect_evidence(db,'tenant-demo',out['prospects'][0]['id'])
+    assert e['contactable'] is False
+    assert 'email' in e['missing_contact_fields']
+    # Import still succeeds -- the rows are real, they are just not yet contactable.
+    with pytest.raises(ValueError,match='prospect_email_missing'):
+        import asyncio; asyncio.get_event_loop().run_until_complete(
+            ps.create_outreach_draft(db,'tenant-demo','u','t',out['prospects'][0]['id']))
+
+
+def test_a_mixed_list_reports_how_many_can_actually_be_emailed(db):
+    rows=ps.parse_csv(_CUSTOMS_CSV)+[{'company':'Harborline Trading','email':'ops@harborline.test'}]
+    out=ps.import_prospects(db,'tenant-demo','u',source='tradesns',data_origin='mixed',rows=rows)
+    assert out['contact_gaps']['emailable']==1 and out['contact_gaps']['no_email']==2
+    assert out['note'] is None, 'a partly emailable list must not carry the zero-email warning'
+
+
+def test_chinese_company_names_do_not_all_fold_to_nothing():
+    """The dedupe key must distinguish Chinese names, or it deletes them.
+
+    With an ASCII-only fold every Chinese company normalises to `''`, so the second
+    Chinese company in a no-email list collides with the first and is dropped as a
+    duplicate -- silent data loss that looks like a clean import.
+    """
+    assert ps._norm_company('宁波海隅机械有限公司')=='宁波海隅机械'
+    assert ps._norm_company('宁波海隅机械股份有限公司')=='宁波海隅机械'
+    assert ps._norm_company('宁波海隅机械有限公司')!=ps._norm_company('苏州澜川电子有限公司')
+    # English legal forms still fold to the same key.
+    assert ps._norm_company('Meridian Trading Co., Ltd')==ps._norm_company('MERIDIAN TRADING')

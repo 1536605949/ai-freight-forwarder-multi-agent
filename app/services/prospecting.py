@@ -12,6 +12,7 @@ import csv
 import hashlib
 import io
 import re
+import unicodedata
 from datetime import date, datetime, timezone, timedelta
 from urllib.parse import urlparse
 from sqlalchemy.orm import Session
@@ -72,6 +73,12 @@ async def search_prospects(db:Session,tenant_id:str,actor:str,trace_id:str,lane:
     return {'lane':lane,'discovered':len(records),'qualified':len(saved),'prospects':[_row(p) for p in saved]}
 
 
+# Legal-form suffixes carry no identity: "Meridian Trading Co., Ltd" and "Meridian Trading"
+# are the same shipper, and so are 宁波海隅机械有限公司 and 宁波海隅机械.
+_LEGAL_SUFFIXES=('有限责任公司','股份有限公司','集团有限公司','有限公司','公司',
+    'coltd','colimited','limited','ltd','llc','inc','gmbh','corp','corporation','company')
+
+
 def _norm_company(name:str)->str:
     """Fold a company name to compare across vendors.
 
@@ -79,8 +86,18 @@ def _norm_company(name:str)->str:
     "MERIDIAN TRADING"). Exact-string matching would import the same company twice and then
     email it twice, which is the one thing this module exists to prevent. This is a
     normalisation, not entity resolution -- see the known gap in docs/ACQUISITION_PLAYBOOK.md.
+
+    The fold must keep non-ASCII letters. An ASCII-only `[^a-z0-9]` strip turns *every*
+    Chinese company name into the empty string, which makes the second Chinese company in a
+    list look like a duplicate of the first and drop it silently -- found by importing a
+    real Chinese customs export, not by reading this function.
     """
-    return re.sub(r'[^a-z0-9]','',(name or '').lower())
+    folded=unicodedata.normalize('NFKC',name or '').lower()
+    folded=re.sub(r'[\W_]+','',folded)
+    for suffix in _LEGAL_SUFFIXES:
+        if folded.endswith(suffix) and len(folded)>len(suffix):
+            return folded[:-len(suffix)]
+    return folded
 
 
 # Real exports do not use our column names. "Est Volume TEU", "Annual TEU", "货量" and "teu"
@@ -101,6 +118,27 @@ _HEADER_ALIASES={
     'source_ref':'source_ref','id':'source_ref','record id':'source_ref',
 }
 
+# Customs records have **two** parties on every row, and which one is the lead depends on
+# what you sell. A forwarder selling China-origin ocean freight wants the exporter; a
+# forwarder selling into China wants the importer. Mapping both to `company` would silently
+# keep whichever column the vendor happened to put second, so they get separate names and
+# the caller picks a side.
+_HEADER_ALIASES.update({
+    '采购商':'importer','进口商':'importer','买家':'importer','买方':'importer',
+    'importer':'importer','buyer':'importer','consignee':'importer','进口商名称':'importer',
+    '出口商':'exporter','供应商':'exporter','发货人':'exporter','卖方':'exporter',
+    'exporter':'exporter','supplier':'exporter','shipper name':'exporter',
+    # Shipment facts. Kept in `raw_payload` so the row stays auditable even though only a
+    # handful of them become first-class columns.
+    'hs code':'hs_code','hs编码':'hs_code','商品编码':'hs_code','海关编码':'hs_code',
+    'product':'product','商品':'product','产品':'product',
+    'amount':'amount','value':'amount','金额':'amount','美元金额':'amount',
+    'quantity':'quantity','数量':'quantity',
+    'port of loading':'port_of_loading','起运港':'port_of_loading','装货港':'port_of_loading',
+    'port of discharge':'port_of_discharge','目的港':'port_of_discharge','卸货港':'port_of_discharge',
+    'date':'record_date','日期':'record_date','报关日期':'record_date','提单日期':'record_date',
+})
+
 
 def _field_name(raw:str)->str:
     k=(raw or '').strip()
@@ -117,14 +155,21 @@ def parse_csv(content:str)->list[dict]:
     return [{_field_name(k):(v or '').strip() for k,v in row.items()} for row in reader]
 
 
-def _clean_row(row:dict,default_lane:str|None)->tuple[dict,str|None]:
-    """Normalise one imported row, or say why it cannot be stored."""
+def _clean_row(row:dict,default_lane:str|None,entity_side:str='exporter')->tuple[dict,str|None]:
+    """Normalise one imported row, or say why it cannot be stored.
+
+    `entity_side` decides which party on a customs row becomes the lead. An explicit
+    `company` column always wins -- a curated list already made that decision for us.
+    """
     def g(k:str)->str:
         v=row.get(k)
         return '' if v is None else str(v).strip()
 
-    company=g('company')
+    lead_side='importer' if entity_side=='importer' else 'exporter'
+    other_side='exporter' if lead_side=='importer' else 'importer'
+    company=g('company') or g(lead_side) or g(other_side)
     if not company: return {},'missing_company'
+    counterparty=g(other_side) if (g(lead_side) or g('company')) else ''
 
     email=g('email').lower() or None
     if email and ('@' not in email or email.endswith('@') or ' ' in email):
@@ -134,17 +179,22 @@ def _clean_row(row:dict,default_lane:str|None)->tuple[dict,str|None]:
     try: volume=float(volume) if volume else None
     except ValueError: volume=None
 
+    # Shipment facts are not leads, but they are the reason to believe the row is real.
+    facts={k:g(k) for k in ('hs_code','product','amount','quantity','port_of_loading',
+                            'port_of_discharge','record_date') if g(k)}
+
     return {'company':company[:200],'country':g('country')[:80] or None,
         'industry':g('industry')[:120] or None,'website':g('website')[:300] or None,
         'trade_lane':(g('trade_lane') or default_lane or '')[:160] or None,
         'est_volume_teu':volume,'contact_name':g('contact_name')[:160] or None,
         'contact_title':g('contact_title')[:160] or None,'email':email,
-        'phone':g('phone')[:80] or None,'source_ref':g('source_ref')[:200] or None},None
+        'phone':g('phone')[:80] or None,'source_ref':g('source_ref')[:200] or None,
+        'counterparty':counterparty[:200] or None,'facts':facts},None
 
 
 def import_prospects(db:Session,tenant_id:str,actor:str,*,source:str,data_origin:str,rows:list[dict],
                      contract_ref:str|None=None,default_lane:str|None=None,
-                     data_as_of:str|None=None)->dict:
+                     data_as_of:str|None=None,entity_side:str='exporter')->dict:
     """Bring a purchased or exported list into the candidate pool.
 
     Import is **not** qualification. Rows land as `status='imported'` with `score=0`, and the
@@ -170,7 +220,7 @@ def import_prospects(db:Session,tenant_id:str,actor:str,*,source:str,data_origin
     def reject(why:str)->None: reasons[why]=reasons.get(why,0)+1
 
     for raw in rows:
-        row,why=_clean_row(raw,default_lane)
+        row,why=_clean_row(raw,default_lane,entity_side)
         if why: reject(why); continue
 
         identity=(_norm_company(row['company']),(row['email'] or '').lower())
@@ -183,20 +233,30 @@ def import_prospects(db:Session,tenant_id:str,actor:str,*,source:str,data_origin
             country=row['country'],industry=row['industry'],website=row['website'],
             trade_lane=row['trade_lane'],est_volume_teu=row['est_volume_teu'],
             source=source,source_ref=ref,data_origin=data_origin,
-            raw_payload={'row':raw,'contract_ref':contract_ref,'data_as_of':data_as_of},
+            raw_payload={'row':raw,'contract_ref':contract_ref,'data_as_of':data_as_of,
+                         'counterparty':row['counterparty'],'facts':row['facts']},
             status='imported',score=0,contact_name=row['contact_name'],
             contact_title=row['contact_title'],email=row['email'],phone=row['phone'])
         db.add(p); accepted.append(p)
 
     rejected=sum(reasons.values())
+    # A customs export has no email column at all. Reporting that at import time is the
+    # difference between "we bought a list" and "we bought a list nobody can email yet".
+    gaps={'emailable':sum(1 for p in accepted if p.email),
+          'no_email':sum(1 for p in accepted if not p.email),
+          'no_contact_name':sum(1 for p in accepted if not p.contact_name)}
     audit(db,tenant_id,actor,'prospect.imported','source',source,
         {'data_origin':data_origin,'contract_ref':contract_ref,'data_as_of':data_as_of,
-         'accepted':len(accepted),'rejected':rejected,'reasons':reasons})
+         'entity_side':entity_side,'accepted':len(accepted),'rejected':rejected,
+         'reasons':reasons,'contact_gaps':gaps})
     db.commit()
     for p in accepted: db.refresh(p)
     return {'source':source,'data_origin':data_origin,'data_as_of':data_as_of,
-        'accepted':len(accepted),'rejected':rejected,
-        'reasons':reasons,'prospects':[_row(p) for p in accepted]}
+        'entity_side':entity_side,'accepted':len(accepted),'rejected':rejected,
+        'reasons':reasons,'contact_gaps':gaps,
+        'note':('这批记录全部没有邮箱，无法直接发信；需要先补联系方式（官网/工商/展会名录）才能触达。'
+                if accepted and not gaps['emailable'] else None),
+        'prospects':[_row(p) for p in accepted]}
 
 
 async def score_prospect(db:Session,tenant_id:str,actor:str,trace_id:str,prospect_id:str)->dict:
@@ -423,8 +483,16 @@ def prospect_evidence(db:Session,tenant_id:str,prospect_id:str)->dict:
     else: verifiability='traceable'
 
     stamp=(p.raw_payload or {}).get('data_as_of')
+    # Contactability is separate from verifiability. A customs record can be perfectly
+    # traceable and still have nobody to write to -- which is the normal case for Chinese
+    # customs exports, and the reason "buy a list" is not the same as "get customers".
+    missing=[name for name,value in (('email',p.email),('contact_name',p.contact_name),
+                                     ('phone',p.phone),('website',p.website)) if not value]
     return {'prospect_id':p.id,'company':p.company,'data_origin':p.data_origin,
         'verifiability':verifiability,'human_can_check':verifiability=='openable',
+        'contactable':bool(p.email),'missing_contact_fields':missing,
+        'counterparty':(p.raw_payload or {}).get('counterparty'),
+        'shipment_facts':(p.raw_payload or {}).get('facts') or {},
         # "Updates daily" is a claim about the feed. This is the date the vendor said the
         # row was current to, so the claim can be checked instead of believed.
         'data_as_of':stamp,'age_days':_age_days(stamp),

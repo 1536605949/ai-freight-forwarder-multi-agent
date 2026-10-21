@@ -44,6 +44,9 @@ class ProspectImportIn(BaseModel):
     rows:list[dict[str,Any]]|None=None
     content:str|None=None
     default_lane:str|None=Field(default=None,max_length=160)
+    # Customs rows carry two parties. Which one is the lead depends on what you sell, so the
+    # caller says it instead of the importer guessing from column order.
+    entity_side:Literal['exporter','importer']='exporter'
 
     @model_validator(mode='after')
     def _payload_matches_format(self):

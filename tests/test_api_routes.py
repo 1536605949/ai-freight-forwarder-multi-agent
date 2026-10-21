@@ -141,6 +141,34 @@ def test_prospect_list_is_tenant_scoped(client, api_db):
     assert [p['id'] for p in r.json()] == ['p_a']
 
 
+def test_import_accepts_a_chinese_customs_export_and_reports_the_contact_gap(client):
+    """The route has to carry `entity_side` and the gap summary, not just the rows.
+
+    A customs export has two parties per row and no email at all. If the edge drops
+    `entity_side`, the caller silently gets the importer instead of the exporter; if it
+    drops `contact_gaps`, a list nobody can email looks like a successful import.
+    """
+    r = client.post('/api/v1/prospects/import', headers=_headers(TENANT), json={
+        'source': 'tradesns', 'data_origin': 'cn_export_2026', 'data_as_of': '2026-09-30',
+        'format': 'csv', 'entity_side': 'exporter',
+        'content': ('出口商,采购商,目的国,HS编码,金额,数量,日期\n'
+                    '宁波海隅机械有限公司,Meridian Trading LLC,United States,8479.89,182000,24,2026-09-28\n'),
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body['entity_side'] == 'exporter'
+    assert [p['company'] for p in body['prospects']] == ['宁波海隅机械有限公司']
+    assert body['contact_gaps'] == {'emailable': 0, 'no_email': 1, 'no_contact_name': 1}
+    assert '没有邮箱' in (body['note'] or '')
+
+
+def test_entity_side_must_be_exporter_or_importer(client):
+    r = client.post('/api/v1/prospects/import', headers=_headers(TENANT), json={
+        'source': 'tradesns', 'data_origin': 'x', 'format': 'csv',
+        'content': 'a,b\n1,2\n', 'entity_side': 'both'})
+    assert r.status_code == 422
+
+
 # --------------------------------------------------------------------------- #
 # Business-rule refusals surface as 409, not 500
 # --------------------------------------------------------------------------- #
