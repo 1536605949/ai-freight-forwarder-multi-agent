@@ -76,3 +76,27 @@ def test_the_readonly_tool_count_matches_the_registry():
     )
     # The claim is "all read-only", so assert the substance, not just the count.
     assert all(spec.read_only for spec in TOOL_SPECS)
+
+
+def test_the_exported_openapi_spec_matches_the_app():
+    """The exported spec is a deliverable; a stale one is a lie in a nice format.
+
+    Found the hard way: two routes were added across earlier commits and the export was
+    never re-run, so the published spec described an API that no longer existed. Nothing
+    failed, because nothing compared them. `scripts/export_openapi.py` is the only writer.
+    """
+    import json
+
+    from app.main import app as fastapi_app
+
+    path = pathlib.Path(__file__).resolve().parents[1] / 'openapi' / 'freight_agent.openapi.json'
+    exported = json.loads(path.read_text(encoding='utf-8'))
+    actual = json.loads(json.dumps(fastapi_app.openapi(), ensure_ascii=False))
+
+    missing = sorted(set(actual['paths']) - set(exported['paths']))
+    extra = sorted(set(exported['paths']) - set(actual['paths']))
+    assert not missing and not extra, (
+        f'openapi spec is stale -- missing {missing}, extra {extra}. '
+        f'Run `python scripts/export_openapi.py`.'
+    )
+    assert exported == actual, 'openapi spec differs from the app; re-run scripts/export_openapi.py'

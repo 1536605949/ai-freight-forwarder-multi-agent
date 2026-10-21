@@ -49,6 +49,7 @@
 ./app/providers/__init__.py
 ./app/providers/booking.py
 ./app/providers/email.py
+./app/providers/fieldmap.py
 ./app/providers/prospecting.py
 ./app/providers/rates.py
 ./app/providers/schedule.py
@@ -73,6 +74,7 @@
 ./app/services/rates.py
 ./app/services/rfq.py
 ./app/services/schedule.py
+./app/services/sourcing.py
 ./app/services/supplier_email.py
 ./app/services/tracking.py
 ./app/services/vessel.py
@@ -87,6 +89,7 @@
 ./deployment/docker-compose.yml
 ./deployment/nginx.conf
 ./docs/ACQUISITION_PLAYBOOK.md
+./docs/ACQUISITION_ROADMAP.md
 ./docs/AGENT_DESIGN.md
 ./docs/ARCHITECTURE.md
 ./docs/ARCHITECTURE_LAYERS.md
@@ -110,6 +113,7 @@
 ./migrations/env.py
 ./migrations/versions/0001_initial.py
 ./migrations/versions/0002_knowledge_and_graph.py
+./migrations/versions/0003_source_runs.py
 ./observability/prometheus.yml
 ./openapi/freight_agent.openapi.json
 ./postman/Freight_Agent_v1.0.postman_collection.json
@@ -164,6 +168,7 @@
 ./tests/test_rates.py
 ./tests/test_schedule.py
 ./tests/test_schema_guard.py
+./tests/test_sourcing.py
 ./tests/test_state_machine.py
 ./tests/test_supplier_email_parser.py
 ./tests/test_tenant_isolation.py
