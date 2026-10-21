@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>知识台 — AI Freight Forwarder</title>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<div class="wrap">
+
+  <nav class="topnav">
+    <span class="brand">AI Freight Forwarder</span>
+    <a href="index.html">首页</a>
+    <a href="overview.html">业务闭环</a>
+    <a href="graph.html">图编排</a>
+    <a href="knowledge.html" class="on">知识台</a>
+    <a href="prospecting.html">主动获客</a>
+    <span class="spacer"></span>
+    <span class="env">tenant-demo · dev auth</span>
+  </nav>
+
+  <h1>知识台 — 带引用的回答，以及「不知道」的权利</h1>
+  <div class="sub">
+    SOP 检索作答、只读工具调用、运行度量。这一页要证明的不是「模型很会说话」，
+    而是<b>没依据时它会说没有依据</b>——货代场景里，一句流畅但错误的话会导致漏截关或错报危险品。
+  </div>
+
+  <div class="split">
+    <div>
+      <div class="card">
+        <h2>
+          <span class="tabs" style="border:none">
+            <span class="tab on" id="tabSop" onclick="switchTab('sop')">SOP 问答</span>
+            <span class="tab" id="tabTool" onclick="switchTab('tool')">工具调用</span>
+            <span class="tab" id="tabMetric" onclick="switchTab('metric')">运行度量</span>
+          </span>
+          <span class="cnt" id="cntHead">就绪</span>
+        </h2>
+
+        <!-- ---------- SOP Q&A ---------- -->
+        <div class="body" id="paneSop">
+          <div style="display:flex;gap:9px;flex-wrap:wrap">
+            <input class="grow" id="q" placeholder="问一个 SOP 问题，例如：甩柜了怎么处理"
+                   onkeydown="if(event.key==='Enter')ask()">
+            <button class="primary" id="btnAsk" onclick="ask()">提问</button>
+          </div>
+          <div class="chips" id="chips"></div>
+          <div id="answer" style="margin-top:14px">
+            <div class="empty">点一个示例问题，或自己输入。回答会带引用；语料没覆盖时会明确拒答</div>
+          </div>
+          <div id="hits"></div>
+        </div>
+
+        <!-- ---------- tool calling ---------- -->
+        <div class="body" id="paneTool" style="display:none">
+          <div style="display:flex;gap:9px;flex-wrap:wrap">
+            <input class="grow" id="tq" placeholder="例如：查一下这张询价单的报价状态 inq_xxx"
+                   onkeydown="if(event.key==='Enter')askTool()">
+            <button class="primary" id="btnTool" onclick="askTool()">让 Agent 查</button>
+          </div>
+          <div class="chips">
+            <span class="chip" onclick="setToolQ('SOP 里甩柜怎么处理')">SOP 问题</span>
+            <span class="chip" onclick="setToolQ('查一下这张询价单的船期和运价')">查询价单</span>
+            <span class="chip out" onclick="setToolQ('帮我删掉这张询价单')">请求写操作（应被拒）</span>
+          </div>
+          <div id="toolOut" style="margin-top:14px">
+            <div class="empty">工具是只读的，且预算上限 4 步。写操作会被分发路径直接拒绝并记录</div>
+          </div>
+        </div>
+
+        <!-- ---------- metrics ---------- -->
+        <div class="body" id="paneMetric" style="display:none">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+            <span style="font-size:12.5px;color:var(--muted)">窗口：最近 7 天 · 全部来自已记录的行，无模型参与</span>
+            <button class="ghost" onclick="loadMetrics()">刷新</button>
+          </div>
+          <div id="metricOut" style="margin-top:12px">
+            <div class="empty"><span class="spin"></span>读取中…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>语料状态 <span class="cnt" id="cntCorpus">—</span></h2>
+        <div class="body" id="corpus">
+          <div class="empty">读取中…</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>为什么「拒答」是功能</h2>
+        <div class="body">
+          <div class="note info">
+            让模型「总结」检索结果，是 SOP 场景最危险的用法：它总能写出一段通顺的话，
+            而<b>通顺</b>和<b>正确</b>在这里没有关系。
+          </div>
+          <div style="margin-top:10px">
+            <div class="kv"><span class="k">作答方式</span><span class="v" style="text-align:left;font-size:11.5px">抽取式：只拼接来自引用片段的句子</span></div>
+            <div class="kv"><span class="k">域外问题</span><span class="v" style="text-align:left;font-size:11.5px">打分前被域外门拒绝，返回空</span></div>
+            <div class="kv"><span class="k">返回</span><span class="v" style="text-align:left;font-size:11.5px"><span class="kbd">answered=false</span> + 原因</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>分数怎么来的</h2>
+        <div class="body">
+          <div class="kv"><span class="k">排序</span><span class="v" style="text-align:left;font-size:11.5px">BM25 + 余弦 + RRF 融合</span></div>
+          <div class="kv"><span class="k">充分性</span><span class="v" style="text-align:left;font-size:11.5px">idf 加权覆盖 + 词法 + 余弦的绝对分</span></div>
+          <div class="kv"><span class="k">阈值</span><span class="v" style="text-align:left;font-size:11.5px">0.38（实测：短问 0.59~0.85，长句 0.41~0.59）</span></div>
+          <div class="note plain" style="margin-top:10px">
+            排序和充分性必须分开：RRF 只看名次，任何语料里总有一个排第一，
+            所以名次分不能回答「这份语料到底覆不覆盖这个问题」。
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    接口：<span class="kbd">POST /api/v1/knowledge/answer</span> · <span class="kbd">POST /api/v1/knowledge/search</span> ·
+    <span class="kbd">POST /api/v1/agent/ask</span> · <span class="kbd">GET /api/v1/metrics/agent</span>。
+    默认向量是哈希词法向量，不是语义模型——检索数字不能读成语义检索水平。
+  </div>
+</div>
+
+<script>
+const H={'Content-Type':'application/json','X-Demo-User':'sales001','X-Demo-Tenant':'tenant-demo'};
+
+/* Sample questions are part of the demo: three the corpus covers, one it does not.
+   The refusal case is the one worth showing, so it is offered explicitly. */
+const SAMPLES=[
+  {q:'甩柜了怎么处理', ok:true},
+  {q:'滞箱费和滞港费有什么区别', ok:true},
+  {q:'危险品订舱需要提前多久', ok:true},
+  {q:'公司食堂几点开饭', ok:false}
+];
+
+let state={tab:'sop',lastQuery:''};
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function $(id){return document.getElementById(id)}
+function shortErr(d){
+  if(!d)return '未知错误';
+  if(typeof d==='string')return d;
+  return Array.isArray(d)?d.map(x=>x.msg||JSON.stringify(x)).join('; '):JSON.stringify(d);
+}
+function pct(v){return Math.max(4,Math.round((Number(v)||0)*100))}
+
+/* ---------------- tabs ---------------- */
+function switchTab(t){
+  state.tab=t;
+  const on={sop:'tabSop',tool:'tabTool',metric:'tabMetric'};
+  const pane={sop:'paneSop',tool:'paneTool',metric:'paneMetric'};
+  Object.keys(on).forEach(k=>{
+    $(on[k]).classList.toggle('on',k===t);
+    $(pane[k]).style.display=(k===t?'':'none');
+  });
+  if(t==='metric')loadMetrics();
+}
+
+/* ---------------- SOP Q&A ---------------- */
+function buildChips(){
+  $('chips').innerHTML=SAMPLES.map(s=>
+    `<span class="chip${s.ok?'':' out'}" onclick="ask('${esc(s.q)}')">${esc(s.q)}${s.ok?'':'（域外）'}</span>`
+  ).join('');
+}
+
+async function ask(preset){
+  const q=(preset||$('q').value||'').trim();
+  if(!q){return}
+  $('q').value=q;
+  const btn=$('btnAsk'); btn.disabled=true; btn.innerHTML='<span class="spin"></span>检索中';
+  $('answer').innerHTML='<div class="empty"><span class="spin"></span>检索语料…</div>';
+  try{
+    const r=await fetch('/api/v1/knowledge/answer',{method:'POST',headers:H,body:JSON.stringify({query:q})});
+    const j=await r.json();
+    if(!r.ok)throw new Error(shortErr(j.detail));
+    renderAnswer(j);
+  }catch(e){
+    $('answer').innerHTML=`<div class="note warn">提问失败：${esc(e.message)}</div>`;
+  }finally{
+    btn.disabled=false; btn.textContent='提问';
+  }
+}
+
+function renderAnswer(j){
+  if(!j.answered){
+    $('answer').innerHTML=`
+      <div class="note info">
+        <b>没有找到依据 —— 这是正确结果。</b><br>
+        问题：${esc(j.query)}<br>
+        原因：<span class="kbd">${esc(j.reason||'insufficient_evidence')}</span>
+        · 最高分 ${Number(j.top_score||0).toFixed(3)}（阈值 0.38 以下不答）
+      </div>
+      <div class="note plain" style="margin-top:10px">
+        系统不会把「最像的片段」拼成一段话交给你。语料没覆盖，就回答没覆盖——
+        追问方向：换一个业务内的问题，或在右侧确认语料是否已灌入。
+      </div>`;
+    $('hits').innerHTML='';
+    return;
+  }
+  const cits=(j.citations||[]).map(c=>`
+    <div class="cite">
+      <div class="ch"><span>${esc(c.document_title||'')}${c.heading?' · '+esc(c.heading):''}</span>
+        <span class="pill ok">${Number(c.score||0).toFixed(3)}</span></div>
+      <div class="score"><div class="track"><div class="fill" style="width:${pct(c.score)}%"></div></div></div>
+      <div class="cb">${esc((c.text||'').slice(0,240))}${(c.text||'').length>240?'…':''}</div>
+    </div>`).join('');
+  state.lastQuery=j.query;
+  $('answer').innerHTML=`
+    <div class="note ok" style="font-size:13px"><b>回答（抽取式）</b><br>${esc(j.answer)}</div>
+    <div style="margin-top:10px">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:2px">
+        引用 ${(j.citations||[]).length} 条 · 向量：${esc(j.embedding_model||'—')}
+      </div>
+      ${cits||'<div class="note plain">没有引用片段（不应出现：有答案必有引用）</div>'}
+      <div style="margin-top:10px"><button class="ghost" onclick="showHits()">查看原始检索命中与分项打分</button></div>
+    </div>`;
+  $('hits').innerHTML='';
+}
+
+/* The sidebar claims ranking and sufficiency are separate. This makes that checkable:
+   /knowledge/search returns the raw top-k with the four signals that produced each score. */
+async function showHits(){
+  const box=$('hits');
+  if(!state.lastQuery)return;
+  box.innerHTML='<div class="empty"><span class="spin"></span>检索中…</div>';
+  try{
+    const r=await fetch('/api/v1/knowledge/search',{method:'POST',headers:H,
+      body:JSON.stringify({query:state.lastQuery,k:5})});
+    const j=await r.json();
+    if(!r.ok)throw new Error(shortErr(j.detail));
+    const rows=(j.hits||[]).map((h,i)=>{
+      const s=h.signals||{};
+      return `<div class="cite">
+        <div class="ch"><span>${i+1}. ${esc(h.document_title||'')}${h.heading?' · '+esc(h.heading):''}</span>
+          <span class="pill${h.score>=0.38?' ok':' no'}">${Number(h.score||0).toFixed(3)}</span></div>
+        <div class="score"><div class="track"><div class="fill" style="width:${pct(h.score)}%"></div></div></div>
+        <div class="cm">bm25 ${Number(s.bm25||0).toFixed(3)} · cosine ${Number(s.cosine||0).toFixed(3)}
+          · coverage ${Number(s.coverage||0).toFixed(3)} · heading ${Number(s.heading_hit||0).toFixed(2)}</div>
+        <div class="cb">${esc((h.text||'').slice(0,160))}…</div></div>`;
+    }).join('');
+    box.innerHTML=`<div class="card" style="margin:12px 0 0">
+      <h2>原始检索命中 <span class="cnt">top ${(j.hits||[]).length} · 阈值 0.38</span></h2>
+      <div class="body">${rows||'<div class="empty">没有命中（域外门在打分前返回空）</div>'}
+        <div class="note plain" style="margin-top:10px">
+          排序由 bm25 / cosine / RRF 决定，但「够不够答」看的是那个绝对分。
+          分数低于阈值的片段仍然可能排在第一名——这正是排序与充分性必须分开的原因。
+        </div></div></div>`;
+  }catch(e){box.innerHTML=`<div class="note warn">检索失败：${esc(e.message)}</div>`}
+}
+
+/* ---------------- tool calling ---------------- */
+function setToolQ(q){$('tq').value=q;askTool()}
+
+async function askTool(){
+  const q=($('tq').value||'').trim();
+  if(!q){return}
+  const btn=$('btnTool'); btn.disabled=true; btn.innerHTML='<span class="spin"></span>调用中';
+  $('toolOut').innerHTML='<div class="empty"><span class="spin"></span>策略选择工具…</div>';
+  try{
+    const r=await fetch('/api/v1/agent/ask',{method:'POST',headers:H,body:JSON.stringify({question:q})});
+    const j=await r.json();
+    if(!r.ok)throw new Error(shortErr(j.detail));
+    renderTool(j);
+  }catch(e){
+    $('toolOut').innerHTML=`<div class="note warn">调用失败：${esc(e.message)}</div>`;
+  }finally{btn.disabled=false; btn.textContent='让 Agent 查'}
+}
+
+function renderTool(j){
+  const steps=(j.steps||[]).map((s,i)=>{
+    const cls=s.ok?'b-ok':'b-fail';
+    const sym=s.ok?'✓':'✕';
+    const args=Object.keys(s.arguments||{}).map(k=>`${k}=${JSON.stringify(s.arguments[k])}`).join(' ');
+    const res=s.ok?JSON.stringify(s.result||{}).slice(0,220):(s.error||'');
+    return `<div class="srow"><div class="badge ${cls}">${sym}</div>
+      <div class="smain">
+        <div class="snm">${i+1}. ${esc(s.tool)} ${s.ok?'':'<span class="pill no">被拒绝</span>'}</div>
+        <div class="sdetail">${esc(args)}</div>
+        <div class="sout">${esc(res)}</div>
+      </div></div>`;
+  }).join('');
+  const cits=(j.citations||[]).map(c=>`
+    <div class="cite"><div class="ch"><span>${esc(c.document_title||'')}${c.heading?' · '+esc(c.heading):''}</span>
+    <span class="pill ok">${Number(c.score||0).toFixed(3)}</span></div>
+    <div class="cb">${esc((c.text||'').slice(0,200))}…</div></div>`).join('');
+  $('toolOut').innerHTML=`
+    <div class="card" style="margin:0 0 12px"><h2>工具轨迹 <span class="cnt">${(j.steps||[]).length} 步 · 上限 4</span></h2>
+      <div class="body tight">${steps||'<div class="empty">没有调用任何工具（策略认为不需要）</div>'}</div></div>
+    <div class="note ok"><b>回答</b><br>${esc(j.answer||'')}</div>
+    <div style="margin-top:9px;font-size:12px;color:var(--muted)">停止原因：<span class="kbd">${esc(j.stopped_reason||'')}</span></div>
+    ${cits}`;
+}
+
+/* ---------------- metrics ---------------- */
+async function loadMetrics(){
+  $('metricOut').innerHTML='<div class="empty"><span class="spin"></span>读取中…</div>';
+  try{
+    const r=await fetch('/api/v1/metrics/agent?days=7',{headers:H});
+    const j=await r.json();
+    if(!r.ok)throw new Error(shortErr(j.detail));
+    renderMetrics(j);
+  }catch(e){
+    $('metricOut').innerHTML=`<div class="note warn">读取失败：${esc(e.message)}</div>`;
+  }
+}
+
+function usd(v){return v===null||v===undefined?'—':'$'+Number(v).toFixed(4)}
+
+function renderMetrics(j){
+  const a=j.agents||{}, g=j.graph||{};
+  const lat=a.latency||{}, tok=a.tokens||{}, cost=a.cost_usd||{};
+  const nodes=g.nodes||[];
+  const max=nodes.reduce((m,n)=>Math.max(m,n.p95_ms||0),1);
+  const nodeBars=nodes.map(n=>{
+    const w=Math.max(3,Math.round((n.p95_ms||0)/max*100));
+    return `<div class="brow"><div class="bn" title="${esc(n.node)}">${esc(n.node)}</div>
+      <div class="track"><div class="fill" style="width:${w}%"></div></div>
+      <div class="bv">${n.p95_ms||0}ms</div></div>`;
+  }).join('');
+  $('metricOut').innerHTML=`
+    <div class="metrics">
+      <div class="m"><div class="lab">运行数</div><div class="num">${a.runs||0}</div></div>
+      <div class="m"><div class="lab">p50 延迟</div><div class="num">${lat.p50_ms==null?'—':lat.p50_ms}<small>${lat.p50_ms==null?'':' ms'}</small></div></div>
+      <div class="m"><div class="lab">p95 延迟</div><div class="num">${lat.p95_ms==null?'—':lat.p95_ms}<small>${lat.p95_ms==null?'':' ms'}</small></div></div>
+    </div>
+    <div class="metrics two" style="margin-top:9px">
+      <div class="m"><div class="lab">token（上报/未上报）</div>
+        <div class="num">${(tok.prompt||0)+(tok.completion||0)}<small> / ${tok.unreported_runs||0} 次</small></div></div>
+      <div class="m"><div class="lab">每次成本</div><div class="num">${usd(cost.per_reported_run)}</div></div>
+    </div>
+    <div class="note ${cost.per_reported_run===null?'info':'plain'}" style="margin-top:11px">
+      ${cost.per_reported_run===null
+        ? '当前没有任何运行上报了成本，所以每次成本是 <b>null</b>，不是 0——「不知道」和「免费」是两个答案。'
+        : `成本按 <b>${cost.reported_runs}</b> 次真正上报的运行求平均，未上报的 ${tok.unreported_runs||0} 次不折算成 0。`}
+    </div>
+    <div style="margin-top:14px">
+      <div style="font-size:12.5px;font-weight:600;margin-bottom:8px">图节点 p95（本次窗口，${g.runs||0} 次运行）</div>
+      ${nodeBars?`<div class="bars">${nodeBars}</div>`:'<div class="empty">窗口内没有图运行记录</div>'}
+    </div>
+    <div style="margin-top:12px;font-size:11.5px;color:var(--muted)">
+      百分位是 nearest-rank，不插值：样本少时它就是「最慢的那一次」，不是统计意义上的分位数。
+    </div>`;
+}
+
+/* ---------------- corpus ---------------- */
+async function loadCorpus(){
+  try{
+    const r=await fetch('/api/v1/knowledge/documents',{headers:H});
+    const j=await r.json();
+    if(!r.ok)throw new Error(shortErr(j.detail));
+    $('cntCorpus').textContent=`${j.count} 篇 / ${j.chunks} 片段`;
+    if(!j.count){
+      $('corpus').innerHTML=`<div class="note warn">
+        <b>语料为空。</b>此时所有问题都会被拒答——那不是 bug，是没有可检索的内容。</div>
+        <div style="margin-top:10px"><button class="primary" onclick="seed()">灌入内置 SOP 语料</button></div>`;
+      return;
+    }
+    const rows=(j.items||[]).slice(0,8).map(d=>
+      `<div class="kv"><span class="k" style="flex:0 0 62px;font-size:11.5px">${esc(d.chunk_count)} 片段</span>
+       <span class="v" style="text-align:left;font-size:12px">${esc(d.title)}</span></div>`).join('');
+    $('corpus').innerHTML=rows+
+      `<div class="note plain" style="margin-top:10px">共 ${j.count} 篇。灌入是幂等的：同一份文档按内容校验和去重，重复灌入不会翻倍。</div>
+       <div style="margin-top:9px"><button class="ghost" onclick="seed()">重新灌入（幂等）</button></div>`;
+  }catch(e){
+    $('corpus').innerHTML=`<div class="note warn">读取失败：${esc(e.message)}</div>`;
+  }
+}
+
+async function seed(){
+  try{
+    const r=await fetch('/api/v1/knowledge/seed',{method:'POST',headers:H});
+    const j=await r.json();
+    if(!r.ok)throw new Error(shortErr(j.detail));
+    await loadCorpus();
+    $('cntHead').textContent=`新增 ${j.created} 篇`;
+  }catch(e){alert('灌入失败：'+e.message)}
+}
+
+/* ---------------- boot ---------------- */
+buildChips();
+loadCorpus();
+</script>
+</body>
+</html>

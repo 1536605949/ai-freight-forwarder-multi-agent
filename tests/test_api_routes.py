@@ -251,3 +251,72 @@ def test_token_tenant_scopes_the_request(client, api_db, jwt_mode):
                    headers={**_token(jwt_mode, ['admin'], tenant=TENANT),
                             **_headers(OTHER)})
     assert r.status_code == 404, 'a demo header must not widen a token scoped to another tenant'
+
+
+# --------------------------------------------------------------------------- #
+# Read-only listings added for the demo UI
+# --------------------------------------------------------------------------- #
+
+def test_inquiry_list_is_tenant_scoped_and_newest_first(client, api_db):
+    """The graph runner's picker reads this. A cross-tenant row here leaks customer data
+    into a dropdown, which is the least dramatic and most damaging way to get it wrong."""
+    _seed_inquiry(api_db, 'inq_old', TENANT)
+    _seed_inquiry(api_db, 'inq_new', TENANT)
+    _seed_inquiry(api_db, 'inq_other', OTHER)
+
+    r = client.get('/api/v1/inquiries', headers=_headers())
+
+    assert r.status_code == 200
+    body = r.json()
+    ids = [x['id'] for x in body['items']]
+    assert set(ids) == {'inq_old', 'inq_new'}
+    assert 'inq_other' not in ids
+    assert body['count'] == 2
+
+
+def test_inquiry_list_clamps_the_limit_instead_of_trusting_it(client, api_db):
+    _seed_inquiry(api_db, 'inq_a', TENANT)
+
+    assert client.get('/api/v1/inquiries?limit=0', headers=_headers()).status_code == 200
+    huge = client.get('/api/v1/inquiries?limit=100000', headers=_headers())
+    assert huge.status_code == 200
+    assert huge.json()['count'] <= 100
+
+
+def test_inquiry_list_filters_by_status(client, api_db):
+    _seed_inquiry(api_db, 'inq_ready', TENANT, status='ready')
+    _seed_inquiry(api_db, 'inq_wait', TENANT, status='needs_clarification')
+
+    r = client.get('/api/v1/inquiries?status=ready', headers=_headers())
+
+    assert [x['id'] for x in r.json()['items']] == ['inq_ready']
+
+
+def test_knowledge_documents_reports_what_the_corpus_contains(client, api_db):
+    """The knowledge page must be able to tell "empty corpus" from "corpus does not cover
+    this question": both produce a refusal and they call for opposite actions."""
+    from app.knowledge.service import ingest_document
+
+    empty = client.get('/api/v1/knowledge/documents', headers=_headers())
+    assert empty.status_code == 200
+    assert empty.json() == {'count': 0, 'chunks': 0, 'items': []}
+
+    ingest_document(api_db, TENANT, title='Booking SOP',
+                    text='## 订舱\n\n截关前 24 小时提交舱单。\n\n## 改单\n\n改单需重新确认舱位。')
+
+    r = client.get('/api/v1/knowledge/documents', headers=_headers())
+    body = r.json()
+    assert body['count'] == 1
+    assert body['chunks'] >= 1
+    assert body['items'][0]['title'] == 'Booking SOP'
+    assert body['items'][0]['chunk_count'] == body['chunks']
+
+
+def test_knowledge_documents_is_tenant_scoped(client, api_db):
+    from app.knowledge.service import ingest_document
+
+    ingest_document(api_db, OTHER, title='Other tenant SOP', text='## 私有\n\n不属于演示租户。')
+
+    r = client.get('/api/v1/knowledge/documents', headers=_headers())
+
+    assert r.json()['count'] == 0

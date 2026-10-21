@@ -24,7 +24,7 @@ python scripts/bootstrap_dev.py          # 建 venv + 装依赖 + alembic upgrad
 python -m uvicorn app.main:app --port 8100
 
 # 另开一个终端：
-pytest -q                                # 单元 + 集成：267 passed
+pytest -q                                # 单元 + 集成：298 passed
 python evaluation/run_eval.py            # 行为评测：6/6 通过
 python evaluation/knowledge_eval.py      # 检索评测：hit@3 95.5%，负例误答 0/12
 python scripts/delivery_check.py         # 交付验收：44/44 通过
@@ -50,13 +50,13 @@ curl -s localhost:8100/api/v1/graph/run -H 'content-type: application/json' \
 
 | 项目 | 结果 | 复现命令 |
 |---|---|---|
-| 单元 / 集成测试 | **267 passed** | `pytest -q` |
+| 单元 / 集成测试 | **298 passed** | `pytest -q` |
 | 覆盖率 | **82%** 整体；v2.0 新增模块 **88%** | `pytest --cov=app --cov=worker --cov=evaluation` |
 | 静态检查 | **ruff 全绿**（规则集见 `pyproject.toml`） | `ruff check app tests worker evaluation scripts` |
 | 行为评测 | **6/6**，全部真实执行 | `python evaluation/run_eval.py` |
 | SOP 检索评测 | **hit@1 90.9% / hit@3 95.5% / 负例误答 0** | `python evaluation/knowledge_eval.py` |
 | 交付验收 | **44/44** | `python scripts/delivery_check.py` |
-| API 路由 | **52** | `GET /docs` |
+| API 路由 | **54** | `GET /docs` |
 | 度量口径 | `GET /api/v1/metrics/agent`（p50/p95、token、成本、闸门分布） | 见下方「可观测性」 |
 | 数据表 / 索引 | **23 / 41** | `alembic upgrade head` |
 | 模块循环依赖 | **0** | `tests/test_architecture_asset.py` |
@@ -348,15 +348,30 @@ curl -X POST http://localhost:8100/api/v1/orchestrate/continue \
 ## 演示页面
 
 仅在 `ENVIRONMENT != production` 时挂载，不属于业务 API 面。
+一条主链路 + 三个可单独验证的能力面，`/demo/` 是统一入口。
 
 | 页面 | 地址 | 内容 |
 |---|---|---|
-| 全流程总览 | `/demo/overview.html` | 十阶段流水线一键跑通，含人工闸门交互 |
+| 首页 | `/demo/` | 四张入口卡，每张写明前置条件与首次运行步骤 |
+| 业务闭环 | `/demo/overview.html` | 十阶段流水线一键跑通，含人工闸门交互 |
+| 图编排控制台 | `/demo/graph.html` | 11 节点条件图：缺字段追问、报价不足等待、人工闸门，停在哪就从哪续跑 |
+| 知识台 | `/demo/knowledge.html` | SOP 检索作答（带引用）、**域外问题明确拒答**、工具调用轨迹、运行度量 |
 | 主动获客 | `/demo/prospecting.html` | 搜客户 → 画像 → 开发信 → 三道合规门禁 |
-| 最简询价 | `/demo/` | 提交一封询价邮件，看结构化结果 |
 
-`tests/test_demo_contract.py` 会断言页面里的阶段元数据与 `orchestrator.STAGES` **逐字一致**——
-前后端契约漂移会直接让测试失败，而不是等到演示当天白屏。
+页面之间共享 `demo_client/theme.css`（同一套配色与组件），顶栏互链。
+设计与评估口径见 [`docs/UI_DESIGN.md`](docs/UI_DESIGN.md)。
+
+三层守卫，缺一层都会退化成「看起来有页面」：
+
+| 层 | 位置 | 守什么 |
+|---|---|---|
+| 契约 | `tests/test_demo_contract.py` | 页面阶段元数据与 `orchestrator.STAGES` 逐字一致 |
+| 契约 | `tests/test_demo_pages.py` | 节点名与 `graph/builder.NODES` 逐字一致、元素 id 可解析、端点名存在 |
+| 运行时 | `scripts/page_smoke.js` + `tests/test_page_runtime.py` | jsdom 里真跑内联 JS、真点按钮、真读 DOM（node + jsdom 缺失时 skip 并说明原因） |
+
+前两层是静态解析——它们能证明页面**提到**了 `hitl_review`，证明不了页面**渲染得出来**。
+这个仓库已经为这个区别付过一次代价（259 个测试全绿，同时第一次真实请求 500），
+所以第三层是必需的，不是锦上添花。
 
 ---
 
@@ -473,7 +488,7 @@ export OPENAI_CHAT_MODEL=...
 
 ```
 app/
-  main.py            52 条路由；鉴权、错误码映射、demo 页面挂载
+  main.py            54 条路由；鉴权、错误码映射、demo 页面挂载
   state_machine.py   InquiryStatus 迁移图 + advance_status()（唯一真相来源）
   enums.py           状态词汇表
   models.py          23 张表（全部带 tenant_id）
@@ -494,7 +509,7 @@ worker/scheduler.py  跟进任务轮询（支持 --once 用于 cron）
 evaluation/          行为评测（run_eval.py）+ 检索评测（knowledge_eval.py）
 migrations/          Alembic；0001/0002 均为显式冻结快照
 demo_client/         静态演示页
-tests/               267 个测试
+tests/               298 个测试
 docs/                架构、分层、集成、交付、审查文档
 ```
 
@@ -588,6 +603,7 @@ revision），并用 AST 扫过 `app/`、`worker/`、`scripts/` 全部文件，�
 | [`docs/ARCHITECTURE_LAYERS.md`](docs/ARCHITECTURE_LAYERS.md) | 分层职责与硬门禁清单 |
 | [`docs/ARCHITECTURE_REVIEW.md`](docs/ARCHITECTURE_REVIEW.md) | 架构审查：模块职责、依赖、数据流、薄弱环节与修复优先级 |
 | [`docs/AGENT_DESIGN.md`](docs/AGENT_DESIGN.md) | Agent 边界与提示词策略 |
+| [`docs/UI_DESIGN.md`](docs/UI_DESIGN.md) | 演示界面：现状评估、优化方案、每个页面的功能区与交互流程 |
 | [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md) | 外部系统接入（含运价数据的硬约束） |
 | [`docs/DELIVERY_STEP1.md`](docs/DELIVERY_STEP1.md) | 第一步交付状态与验收口径 |
 | [`docs/PRODUCTION_GAPS.md`](docs/PRODUCTION_GAPS.md) | 距离生产还差什么 |

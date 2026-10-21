@@ -40,7 +40,7 @@ from app.knowledge.service import ingest_document
 from app.agents.tool_loop import run_tool_loop
 from app.agents.tools import ToolContext
 from app.providers.tracking import get_tracking_provider
-from app.models import Inquiry,SupplierQuote,CustomerQuote,Booking,TrackingEvent,Lead,Customer,AgentRun,AuditEvent,CRMActivity,RateSnapshot,ProspectCandidate,OutreachActivity
+from app.models import Inquiry,SupplierQuote,CustomerQuote,Booking,TrackingEvent,Lead,Customer,AgentRun,AuditEvent,CRMActivity,RateSnapshot,ProspectCandidate,OutreachActivity,KnowledgeDocument
 from app.metrics import REQUESTS
 from app.logging_utils import configure_logging,log_event
 from app.config import get_settings
@@ -149,6 +149,19 @@ async def api_growth(customer_id:str,request:Request,db:Session=Depends(get_db),
 @app.post('/api/v1/messages/inbound')
 async def api_inbound(x:InboundMessage,request:Request,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):
     return await ingest_message(db,p.tenant_id,p.user_id,request.state.trace_id,x)
+
+@app.get('/api/v1/inquiries')
+def list_inquiries(limit:int=20,status:str|None=None,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):
+    """Recent inquiries for this tenant, newest first.
+
+    Exists because a graph runner needs something to run on, and the alternative -- typing an
+    id copied from a log -- is not a demo. `limit` is clamped rather than trusted: an
+    unbounded list is the cheapest way to make a picker load a whole table.
+    """
+    q=db.query(Inquiry).filter_by(tenant_id=p.tenant_id)
+    if status: q=q.filter_by(status=status)
+    rows=q.order_by(Inquiry.created_at.desc()).limit(max(1,min(limit,100))).all()
+    return {'count':len(rows),'items':[_row(x) for x in rows]}
 
 @app.get('/api/v1/inquiries/{inquiry_id}')
 def get_inquiry(inquiry_id:str,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):
@@ -318,6 +331,20 @@ def knowledge_seed(db:Session=Depends(get_db),p:Principal=Depends(require_role('
     results=seed_corpus(db,p.tenant_id)
     return {'documents':len(results),'created':sum(1 for r in results if r.created),
             'results':[r.as_dict() for r in results]}
+
+@app.get('/api/v1/knowledge/documents')
+def knowledge_documents(db:Session=Depends(get_db),p:Principal=Depends(current_principal)):
+    """What the tenant's corpus actually contains.
+
+    The knowledge page needs this to distinguish "the corpus is empty, seed it" from "the
+    corpus does not cover your question". Both produce a refusal, and they call for opposite
+    actions -- without this endpoint the page would have to guess.
+    """
+    rows=(db.query(KnowledgeDocument).filter_by(tenant_id=p.tenant_id)
+          .order_by(KnowledgeDocument.title).all())
+    return {'count':len(rows),'chunks':sum(r.chunk_count or 0 for r in rows),
+            'items':[{'id':r.id,'title':r.title,'source':r.source,'version':r.version,
+                      'chunk_count':r.chunk_count} for r in rows]}
 
 @app.post('/api/v1/knowledge/search')
 def knowledge_search(x:KnowledgeQueryIn,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):

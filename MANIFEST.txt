@@ -77,9 +77,12 @@
 ./app/services/tracking.py
 ./app/services/vessel.py
 ./app/state_machine.py
+./demo_client/graph.html
 ./demo_client/index.html
+./demo_client/knowledge.html
 ./demo_client/overview.html
 ./demo_client/prospecting.html
+./demo_client/theme.css
 ./deployment/.env.example
 ./deployment/docker-compose.yml
 ./deployment/nginx.conf
@@ -93,6 +96,7 @@
 ./docs/PRODUCTION_GAPS.md
 ./docs/REFERENCES.md
 ./docs/SECURITY.md
+./docs/UI_DESIGN.md
 ./docs/architecture/project2_architecture.png
 ./evaluation/README.md
 ./evaluation/golden_dataset.jsonl
@@ -119,6 +123,7 @@
 ./scripts/dev_token.py
 ./scripts/export_openapi.py
 ./scripts/gen_checksums.py
+./scripts/page_smoke.js
 ./scripts/release_gate.py
 ./scripts/restore.sh
 ./scripts/seed_demo.py
@@ -133,6 +138,7 @@
 ./tests/test_config_docs.py
 ./tests/test_delivery_check.py
 ./tests/test_demo_contract.py
+./tests/test_demo_pages.py
 ./tests/test_doc_claims.py
 ./tests/test_eval_harness.py
 ./tests/test_followup_compliance.py
@@ -146,6 +152,7 @@
 ./tests/test_orchestrator.py
 ./tests/test_packaging.py
 ./tests/test_packaging_manifest.py
+./tests/test_page_runtime.py
 ./tests/test_parser.py
 ./tests/test_pricing_hitl.py
 ./tests/test_prospecting.py

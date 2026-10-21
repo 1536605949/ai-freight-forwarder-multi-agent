@@ -18,8 +18,11 @@ Project 2 — 实际运行顺序
     python -m worker.scheduler        # 另开一个终端，可选
 
 打开：
+    演示入口           http://localhost:8100/demo/
+    业务闭环 Demo      http://localhost:8100/demo/overview.html
+    图编排控制台       http://localhost:8100/demo/graph.html
+    知识台             http://localhost:8100/demo/knowledge.html
     主动获客 Demo      http://localhost:8100/demo/prospecting.html
-    全流程总览 Demo    http://localhost:8100/demo/overview.html
     API 文档           http://localhost:8100/docs
 
 Makefile 等价入口：make bootstrap / make run / make test / make acceptance
@@ -27,7 +30,7 @@ Makefile 等价入口：make bootstrap / make run / make test / make acceptance
 
 ★ 验证清单（服务启动后，另开终端）
 ----------------------------------
-    pytest -q                                        # 267 passed
+    pytest -q                                        # 298 passed
     ruff check app tests worker evaluation scripts   # All checks passed
     python evaluation/run_eval.py                    # 6/6，全部真实执行
     python evaluation/knowledge_eval.py              # hit@3 95.5%，负例误答 0/12

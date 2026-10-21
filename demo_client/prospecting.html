@@ -104,10 +104,31 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .m{background:var(--gray-bg);border-radius:9px;padding:11px 12px;text-align:center}
 .m .lab{font-size:11.5px;color:var(--muted)}
 .m .num{font-size:21px;font-weight:600;margin-top:2px}
+
+/* top navigation — shared with theme.css so the four demo pages read as one product */
+.topnav{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:18px;
+  padding-bottom:14px;border-bottom:1px solid var(--line)}
+.topnav .brand{font-size:13px;font-weight:600;margin-right:8px;color:var(--ink)}
+.topnav a{padding:5px 11px;border-radius:7px;font-size:12.5px;color:var(--muted);text-decoration:none}
+.topnav a:hover{background:var(--gray-bg);color:var(--ink)}
+.topnav a.on{background:var(--ink);color:#fff}
+.topnav .spacer{flex:1}
+.topnav .env{font-size:11px;color:var(--muted);font-family:ui-monospace,Menlo,Consolas,monospace}
 </style>
 </head>
 <body>
 <div class="wrap">
+
+  <nav class="topnav">
+    <span class="brand">AI Freight Forwarder</span>
+    <a href="index.html">首页</a>
+    <a href="overview.html">业务闭环</a>
+    <a href="graph.html">图编排</a>
+    <a href="knowledge.html">知识台</a>
+    <a href="prospecting.html" class="on">主动获客</a>
+    <span class="spacer"></span>
+    <span class="env">tenant-demo · dev auth</span>
+  </nav>
   <h1>主动获客 Agent — 从找客户到签单的闭环演示</h1>
   <div class="sub">Agent 自动搜索目标航线客户 → 判断匹配度 → 生成开发信 → 人工放行 → 进入询价报价流程</div>
 

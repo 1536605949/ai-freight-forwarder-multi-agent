@@ -1,1 +1,108 @@
-<!doctype html><html><head><meta charset="utf-8"><title>AI Freight Forwarder</title><style>body{font-family:system-ui;max-width:980px;margin:30px auto;padding:0 20px}input,textarea{width:100%;box-sizing:border-box;padding:10px;margin:7px 0}button{padding:10px 16px}.box{white-space:pre-wrap;border:1px solid #ddd;padding:14px;border-radius:8px;margin-top:10px}</style></head><body><h1>Project 2 — AI Freight Forwarder</h1><p>Demo: inbound inquiry → structured workflow</p><input id="email" value="buyer@example.com"><textarea id="body" rows="5">We need 2x40HQ from Shanghai to Los Angeles, please quote.</textarea><button onclick="go()">提交询价</button><div id="out" class="box">Ready</div><script>async function go(){let r=await fetch('/api/v1/messages/inbound',{method:'POST',headers:{'Content-Type':'application/json','X-Demo-User':'sales001','X-Demo-Tenant':'tenant-demo'},body:JSON.stringify({external_message_id:'web-'+Date.now(),sender_email:email.value,subject:'New ocean freight inquiry',body:body.value})});out.textContent=JSON.stringify(await r.json(),null,2)}</script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Freight Forwarder — 演示入口</title>
+<link rel="stylesheet" href="theme.css">
+<style>
+.cards{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+@media(max-width:860px){.cards{grid-template-columns:1fr}}
+.entry{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;
+  display:flex;flex-direction:column;gap:9px;transition:.18s}
+.entry:hover{border-color:var(--line2);box-shadow:0 2px 10px rgba(31,30,28,.05)}
+.entry .tag{font-size:11px;color:var(--muted);font-family:var(--mono)}
+.entry h2{font-size:15px;font-weight:600}
+.entry p{margin:0;font-size:12.5px;color:#4A4945;line-height:1.7}
+.entry .go-line{margin-top:auto;padding-top:6px;display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.entry .need{font-size:11px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <nav class="topnav">
+    <span class="brand">AI Freight Forwarder</span>
+    <a href="index.html" class="on">首页</a>
+    <a href="overview.html">业务闭环</a>
+    <a href="graph.html">图编排</a>
+    <a href="knowledge.html">知识台</a>
+    <a href="prospecting.html">主动获客</a>
+    <span class="spacer"></span>
+    <span class="env">tenant-demo · dev auth</span>
+  </nav>
+
+  <h1>国际货代多智能体平台 — 演示入口</h1>
+  <div class="sub">
+    一条询价从解析到订舱的完整链路，加上四个可以单独验证的能力面。
+    每个页面只演示一件事，并且都对着真实接口跑——没有一段是写死的截图。
+  </div>
+
+  <div class="cards">
+    <div class="entry">
+      <span class="tag">01 · 业务流程</span>
+      <h2>业务闭环</h2>
+      <p>询价解析 → 船期 → 运价 → RFQ → 比价 → <b>人工放行</b> → 报价 → 订舱 → 船位跟踪。
+         线性推进，走到人工闸门会主动停下。</p>
+      <div class="go-line">
+        <a href="overview.html"><button class="primary">进入</button></a>
+        <span class="need">需要：演示询价（页面内可一键创建）</span>
+      </div>
+    </div>
+
+    <div class="entry">
+      <span class="tag">02 · 编排引擎</span>
+      <h2>图编排控制台</h2>
+      <p>11 个节点的 LangGraph 状态图：四个条件分支，停在哪个节点就从哪个节点续跑。
+         包含「缺字段追问」「报价不足等待」「人工闸门」三种真实交互。</p>
+      <div class="go-line">
+        <a href="graph.html"><button class="primary">进入</button></a>
+        <span class="need">需要：一张询价单（页面内可新建）</span>
+      </div>
+    </div>
+
+    <div class="entry">
+      <span class="tag">03 · 知识能力</span>
+      <h2>知识台</h2>
+      <p>SOP 检索作答（带引用）、<b>域外问题明确拒答</b>、只读工具调用轨迹、运行延迟与成本度量。
+         拒答在这里是一等结果，不是错误。</p>
+      <div class="go-line">
+        <a href="knowledge.html"><button class="primary">进入</button></a>
+        <span class="need">需要：SOP 语料（页面内可一键灌入）</span>
+      </div>
+    </div>
+
+    <div class="entry">
+      <span class="tag">04 · 增长</span>
+      <h2>主动获客</h2>
+      <p>从公开信息找潜客 → 富化 → 合规复核 → 草拟触达 → 人工审阅后发送。
+         未核实的线索与 CRM 物理隔离。</p>
+      <div class="go-line">
+        <a href="prospecting.html"><button class="primary">进入</button></a>
+        <span class="need">需要：演示潜客（合成数据，带 <span class="kbd">mock_synthetic</span> 标记）</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <h2>第一次跑？</h2>
+    <div class="body">
+      <div class="note plain">
+        <b>1.</b> <span class="kbd">python scripts/bootstrap_dev.py</span> —— 建 venv、装依赖、<b>用 alembic 建表</b>、灌演示数据与 SOP 语料。<br>
+        <b>2.</b> <span class="kbd">uvicorn app.main:app --reload --port 8100</span><br>
+        <b>3.</b> 打开 <span class="kbd">http://localhost:8100/demo/</span>，或直接看 <a href="/docs">API 文档</a>。
+      </div>
+      <div class="note info" style="margin-top:10px">
+        应用启动时会校验数据库是否在 alembic head：不在就<b>拒绝启动</b>并给出修复命令，
+        而不是带着旧 schema 起来再在某个接口上 500。
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    金额、权限、状态迁移、审批、发送全部由确定性代码控制，模型只负责理解与措辞。
+    演示使用 <span class="kbd">AUTH_MODE=dev</span> 请求头鉴权，<b>不可用于生产</b>。
+  </div>
+</div>
+</body>
+</html>

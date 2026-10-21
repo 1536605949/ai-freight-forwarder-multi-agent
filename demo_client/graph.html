@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>图编排控制台 — AI Freight Forwarder</title>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<div class="wrap">
+
+  <nav class="topnav">
+    <span class="brand">AI Freight Forwarder</span>
+    <a href="index.html">首页</a>
+    <a href="overview.html">业务闭环</a>
+    <a href="graph.html" class="on">图编排</a>
+    <a href="knowledge.html">知识台</a>
+    <a href="prospecting.html">主动获客</a>
+    <span class="spacer"></span>
+    <span class="env">tenant-demo · dev auth</span>
+  </nav>
+
+  <h1>图编排控制台 — 11 个节点，4 个分支，1 道人工闸门</h1>
+  <div class="sub">
+    LangGraph 状态图：条件路由决定「继续 / 追问 / 停下等人 / 终止」，停在哪个节点就从哪个节点续跑。
+    与「业务闭环」页的区别见右下角——那页跑的是旧的线性编排，这页跑的是 v2.0 的状态图。
+  </div>
+
+  <div class="bar">
+    <label>询价单</label>
+    <select class="grow" id="inq"></select>
+    <button class="ghost" onclick="createInquiry()">+ 新建演示询价</button>
+    <label>船舶</label>
+    <input id="vessel" value="MAEU-VESSEL" style="width:130px">
+    <label class="check" title="仅演示：写入带 synthetic 标记的合成报价，生产环境强制关闭">
+      <input type="checkbox" id="synth"> 注入合成报价（演示）
+    </label>
+    <button class="primary" id="btnRun" onclick="runGraph()">运行状态图</button>
+    <button class="ghost" onclick="reset()">重置</button>
+  </div>
+
+  <div class="rail" id="rail"></div>
+
+  <div class="split">
+    <div>
+      <div class="card">
+        <h2>执行轨迹 <span class="cnt" id="cntTrace">尚未运行</span></h2>
+        <div id="trace"><div class="empty">选一张询价单，点「运行状态图」。图会在该停的地方停下，而不是跑到底再报错</div></div>
+        <div id="gatebox"></div>
+      </div>
+
+      <div class="card">
+        <h2>状态机语义 <span class="cnt">为什么是图而不是循环</span></h2>
+        <div class="body">
+          <div class="note plain">
+            一个 <span class="kbd">for</span> 循环能表达「依次执行」，表达不了「字段不全就回头问」「报价不够就不许定价」
+            「人没放行就不许发信」。这四个位置是条件边，不是 <span class="kbd">if</span> 里 <span class="kbd">break</span>：
+          </div>
+          <div style="margin-top:10px">
+            <div class="kv"><span class="k">① 追问</span><span class="v" style="text-align:left;font-size:11.5px">understand → clarify（缺字段时）</span></div>
+            <div class="kv"><span class="k">② 等报价</span><span class="v" style="text-align:left;font-size:11.5px">supplier_quotes → END（不足最低条数）</span></div>
+            <div class="kv"><span class="k">③ 人工闸门</span><span class="v" style="text-align:left;font-size:11.5px">hitl_review → END（未审批）</span></div>
+            <div class="kv"><span class="k">④ 失败即停</span><span class="v" style="text-align:left;font-size:11.5px">任一节点失败 → END，上报该节点为原因</span></div>
+          </div>
+          <div class="note warn" style="margin-top:11px">
+            这张图<b>没有自动审批路径</b>：本页也没有「一键直通」按钮。放行只能由人点，
+            放行动作落在 <span class="kbd">approval.send_quote</span> 的服务层门禁上，编排层改错也发不出去。
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>运行状态 <span class="cnt" id="cntRun">—</span></h2>
+        <div class="body" id="runState">
+          <div class="empty">运行后显示 run_id、状态、停止原因与续跑入口</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>节点耗时 <span class="cnt" id="cntLat">本次运行</span></h2>
+        <div class="body" id="lat"><div class="empty">每个节点在 <span class="kbd">_guarded</span> 包装器里计时，失败路径也计</div></div>
+      </div>
+
+      <div class="card">
+        <h2>两套编排，一个业务</h2>
+        <div class="body">
+          <div class="kv"><span class="k">业务闭环</span><span class="v" style="text-align:left;font-size:11.5px">10 阶段线性推进，演示「整条链路」</span></div>
+          <div class="kv"><span class="k">本页</span><span class="v" style="text-align:left;font-size:11.5px">11 节点条件图，演示「分支与恢复」</span></div>
+          <div class="kv"><span class="k">共同点</span><span class="v" style="text-align:left;font-size:11.5px">同一批服务层函数、同一道门禁</span></div>
+          <div class="note info" style="margin-top:10px">
+            两者都调用 <span class="kbd">services/</span> 里的确定性函数，所以「哪条编排先跑」不会改变金额或权限——
+            编排只决定顺序，不决定结果。
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    演示数据：租户 <span class="kbd">tenant-demo</span>，鉴权走 <span class="kbd">AUTH_MODE=dev</span> 请求头。
+    接口：<span class="kbd">POST /api/v1/graph/run</span> · <span class="kbd">POST /api/v1/graph/resume</span> ·
+    <span class="kbd">GET /api/v1/graph/status/{inquiry_id}</span>
+  </div>
+</div>
+
+<script>
+const H={'Content-Type':'application/json','X-Demo-User':'sales001','X-Demo-Tenant':'tenant-demo'};
+
+/* Node metadata is the UI contract: keys must equal app/graph/builder.NODES, in order.
+   tests/test_demo_pages.py asserts that, so a node added to the graph cannot go unrendered. */
+const NODE_META={
+  understand:     {t:'理解询价', d:'解析+校验'},
+  clarify:        {t:'追问客户', d:'缺字段时'},
+  schedules:      {t:'船期查询', d:'DCSA'},
+  rates:          {t:'运价查询', d:'合约/指数'},
+  rfq:            {t:'发送询价', d:'供应商'},
+  supplier_quotes:{t:'收集报价', d:'门槛：≥2'},
+  optimize:       {t:'比价定价', d:'确定性'},
+  hitl_review:    {t:'人工放行', d:'闸门', gate:true},
+  quote_send:     {t:'发送报价', d:'服务层门禁', gate:true},
+  booking:        {t:'订舱', d:'Booking'},
+  vessel_tracking:{t:'船位跟踪', d:'AIS'}
+};
+const NODES=Object.keys(NODE_META);
+
+let state={inquiryId:null, run:null, busy:false, inquiries:[]};
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function shortErr(d){
+  if(!d)return '未知错误';
+  if(typeof d==='string')return d;
+  return Array.isArray(d)?d.map(x=>x.msg||JSON.stringify(x)).join('; '):JSON.stringify(d);
+}
+function $(id){return document.getElementById(id)}
+
+/* ---------------- rail ---------------- */
+function buildRail(){
+  $('rail').innerHTML=NODES.map((n,i)=>{
+    const m=NODE_META[n];
+    return `<div class="step${m.gate?' gate':''}" id="st_${n}">
+      <div class="n">${i+1}</div><div class="t">${m.t}</div><div class="d">${m.d}</div></div>`;
+  }).join('');
+}
+function setNode(n,cls){
+  const el=$('st_'+n); if(!el)return;
+  el.className='step'+(NODE_META[n].gate?' gate':'')+(cls?' '+cls:'');
+}
+function clearRail(){NODES.forEach(n=>setNode(n,null))}
+
+/* ---------------- inquiry picker ---------------- */
+async function loadInquiries(){
+  try{
+    const r=await fetch('/api/v1/inquiries?limit=30',{headers:H});
+    const j=await r.json();
+    state.inquiries=j.items||[];
+    if(!state.inquiries.length){
+      $('inq').innerHTML='<option value="">（没有询价单，点「新建演示询价」）</option>';
+      return;
+    }
+    $('inq').innerHTML=state.inquiries.map(x=>{
+      const label=`${x.id.slice(0,14)}… · ${x.origin||'?'} → ${x.destination||'?'} · ${x.status}`;
+      return `<option value="${esc(x.id)}">${esc(label)}</option>`;
+    }).join('');
+    state.inquiryId=$('inq').value;
+  }catch(e){
+    $('inq').innerHTML=`<option value="">加载失败：${esc(e.message)}</option>`;
+  }
+}
+
+async function createInquiry(){
+  try{
+    const r=await fetch('/api/v1/messages/inbound',{method:'POST',headers:H,body:JSON.stringify({
+      external_message_id:'graph-demo-'+Date.now(),
+      sender_email:'buyer@acme-import.com',
+      subject:'Ocean freight quotation request',
+      body:'We need 1x40HQ from Shanghai to Los Angeles, ETD 2026-11-20, commodity furniture.'
+    })});
+    const j=await r.json();
+    if(!r.ok)throw new Error(shortErr(j.detail));
+    await loadInquiries();
+    $('inq').value=j.inquiry_id;
+    state.inquiryId=j.inquiry_id;
+    clearView();
+  }catch(e){alert('创建失败：'+e.message)}
+}
+
+/* ---------------- run ---------------- */
+async function runGraph(){
+  if(state.busy)return;
+  const id=$('inq').value;
+  if(!id){alert('请先选择或创建一张询价单');return}
+  state.busy=true; state.inquiryId=id;
+  const btn=$('btnRun'); btn.disabled=true; btn.innerHTML='<span class="spin"></span>运行中';
+  clearRail(); $('gatebox').innerHTML='';
+  $('trace').innerHTML='<div class="empty"><span class="spin"></span>状态图执行中…</div>';
+  try{
+    const r=await fetch('/api/v1/graph/run',{method:'POST',headers:H,body:JSON.stringify({
+      inquiry_id:id,
+      vessel_name:($('vessel').value||'').trim()||null,
+      allow_synthetic_quotes:$('synth').checked
+    })});
+    const j=await r.json();
+    if(!r.ok)throw new Error(shortErr(j.detail));
+    render(j);
+    await loadInquiries();
+  }catch(e){
+    $('trace').innerHTML=`<div class="empty" style="color:var(--red)">运行失败：${esc(e.message)}</div>`;
+  }finally{
+    state.busy=false; btn.disabled=false; btn.textContent='运行状态图';
+  }
+}
+
+async function resume(){
+  if(state.busy)return;
+  state.busy=true;
+  try{
+    const r=await fetch('/api/v1/graph/resume',{method:'POST',headers:H,body:JSON.stringify({
+      inquiry_id:state.inquiryId, vessel_name:($('vessel').value||'').trim()||null
+    })});
+    const j=await r.json();
+    if(!r.ok)throw new Error(shortErr(j.detail));
+    render(j);
+    await loadInquiries();
+  }catch(e){
+    $('gatebox').innerHTML=`<div class="gatebox" style="background:var(--red-bg);border-color:var(--red)">
+      <div class="gt" style="color:var(--red)">续跑失败</div>
+      <div class="gb" style="color:var(--red)">${esc(e.message)}</div></div>`;
+  }finally{state.busy=false}
+}
+
+/* ---------------- render ---------------- */
+function badge(st){
+  const m={ok:['b-ok','✓'],waiting_approval:['b-wait','⏸'],waiting_clarification:['b-wait','?'],
+           waiting_supplier_quotes:['b-wait','⏸'],failed:['b-fail','✕'],skipped:['b-skip','–']};
+  const [c,g]=m[st]||['b-run','•'];
+  return `<div class="badge ${c}">${g}</div>`;
+}
+function outputs(out){
+  if(!out)return '';
+  const keys=Object.keys(out).filter(k=>k!=='resume_node'&&k!=='missing_fields');
+  if(!keys.length)return '';
+  return `<div class="sout">${keys.map(k=>{
+    let v=out[k];
+    if(v===null||v===undefined)return '';
+    if(Array.isArray(v))v=v.length>6?v.slice(0,6).join(', ')+' …':v.join(', ');
+    if(typeof v==='object')v=JSON.stringify(v);
+    return `<b>${esc(k)}</b> = ${esc(v)}`;
+  }).filter(Boolean).join(' &nbsp;·&nbsp; ')}</div>`;
+}
+function render(run){
+  state.run=run;
+  clearRail();
+  (run.steps||[]).forEach(s=>{
+    const cls=s.status==='ok'?'done':(s.status==='failed'?'failed':(s.status==='skipped'?'skipped':'active'));
+    setNode(s.node,cls);
+  });
+  renderTrace(run);
+  renderState(run);
+  renderLatency(run);
+  renderGate(run);
+}
+
+function renderTrace(run){
+  const steps=run.steps||[];
+  if(!steps.length){$('trace').innerHTML='<div class="empty">没有节点被执行</div>';return}
+  $('trace').innerHTML=steps.map(s=>{
+    const m=NODE_META[s.node]||{t:s.node,d:''};
+    const g=m.gate?'<span class="pill gate">闸门</span>':'';
+    const ms=(s.elapsed_ms===undefined)?'':'<span class="pill">'+s.elapsed_ms+' ms</span>';
+    return `<div class="srow">${badge(s.status)}
+      <div class="smain">
+        <div class="snm">${esc(m.t)} <span style="color:#B5B3AD;font-weight:400">${esc(s.node)}</span>${g}${ms}</div>
+        <div class="sdetail">${esc(s.detail||'')}</div>
+        ${outputs(s.outputs)}
+      </div></div>`;
+  }).join('');
+  const ok=steps.filter(s=>s.status==='ok').length;
+  $('cntTrace').textContent=`${ok} / ${NODES.length} 节点完成`;
+}
+
+function renderState(run){
+  $('cntRun').textContent=run.status;
+  const resumable=run.resume_node?`<div class="kv"><span class="k">续跑入口</span><span class="v">${esc(run.resume_node)}</span></div>`:'';
+  $('runState').innerHTML=`
+    <div class="kv"><span class="k">运行号</span><span class="v" style="font-family:var(--mono);font-size:11.5px">${esc(run.run_id)}</span></div>
+    <div class="kv"><span class="k">状态</span><span class="v">${esc(run.status)}</span></div>
+    <div class="kv"><span class="k">停止原因</span><span class="v">${esc(run.stop_reason||'—')}</span></div>
+    <div class="kv"><span class="k">线程</span><span class="v" style="font-family:var(--mono);font-size:11.5px">${esc(run.thread_id)}</span></div>
+    ${resumable}
+    <div class="note ${run.synthetic_quotes_allowed?'warn':'plain'}" style="margin-top:10px">
+      ${run.synthetic_quotes_allowed
+        ? '本次运行注入了<b>合成报价</b>（带 synthetic 标记），只用于演示；生产环境该开关被强制关闭。'
+        : '本次运行<b>未</b>注入合成报价，报价只能来自真实登记或供应商回信。'}
+    </div>`;
+}
+
+function renderLatency(run){
+  const steps=(run.steps||[]).filter(s=>s.elapsed_ms!==undefined);
+  if(!steps.length){$('lat').innerHTML='<div class="empty">没有计时数据</div>';return}
+  const max=Math.max.apply(null,steps.map(s=>s.elapsed_ms).concat([1]));
+  $('lat').innerHTML='<div class="bars">'+steps.map(s=>{
+    const pct=Math.max(3,Math.round(s.elapsed_ms/max*100));
+    const slow=s.elapsed_ms>=max*0.7&&max>50;
+    return `<div class="brow">
+      <div class="bn" title="${esc(s.node)}">${esc(s.node)}</div>
+      <div class="track"><div class="fill${slow?' slow':''}" style="width:${pct}%"></div></div>
+      <div class="bv">${s.elapsed_ms}ms</div></div>`;
+  }).join('')+'</div>';
+  const total=steps.reduce((a,s)=>a+s.elapsed_ms,0);
+  $('cntLat').textContent='合计 '+total+' ms';
+}
+
+/* ---------------- gate: three different interactions, all real ---------------- */
+function lastStep(run,node){
+  const steps=(run.steps||[]).filter(s=>s.node===node);
+  return steps.length?steps[steps.length-1]:null;
+}
+
+function renderGate(run){
+  const box=$('gatebox');
+  if(run.status==='completed'){box.innerHTML='';return}
+  if(run.status==='failed'){
+    box.innerHTML=`<div class="gatebox" style="background:var(--red-bg);border-color:var(--red)">
+      <div class="gt" style="color:var(--red)">✕ 图在第一个失败节点终止</div>
+      <div class="gb" style="color:var(--red)">停止原因：<b>${esc(run.stop_reason||'—')}</b><br>
+        失败即停：后面的节点不会再跑，上报的原因就是第一个失败的那一个，不是最后一个。</div></div>`;
+    return;
+  }
+  if(run.status==='waiting_clarification'){renderClarify(box,run);return}
+  if(run.status==='waiting_supplier_quotes'){renderQuotes(box,run);return}
+  if(run.status==='waiting_approval'){renderApproval(box,run);return}
+  box.innerHTML='';
+}
+
+function renderClarify(box,run){
+  const c=lastStep(run,'understand');
+  const missing=(c&&c.outputs&&c.outputs.missing_fields)||[];
+  box.innerHTML=`<div class="gatebox">
+    <div class="gt">? 停在理解阶段：询价信息不完整</div>
+    <div class="gb">缺少：<b>${esc(missing.join('、')||'未知字段')}</b><br>
+      图不会猜缺失字段，而是走 clarify 分支生成追问。补全后从 understand 续跑。</div>
+    <div class="gacts">
+      <input id="fixEtd" placeholder="ETD 例：2026-11-20" style="flex:1;min-width:150px">
+      <button class="go" onclick="fillAndResume()">补全并续跑</button>
+    </div></div>`;
+}
+
+async function fillAndResume(){
+  const etd=($('fixEtd').value||'').trim();
+  if(!etd){alert('填写一个 ETD');return}
+  try{
+    const r=await fetch(`/api/v1/inquiries/${encodeURIComponent(state.inquiryId)}`,
+      {method:'PATCH',headers:H,body:JSON.stringify({etd:etd})});
+    if(!r.ok)throw new Error(shortErr((await r.json()).detail));
+    await resume();
+  }catch(e){alert('补全失败：'+e.message)}
+}
+
+function renderQuotes(box,run){
+  const q=lastStep(run,'supplier_quotes');
+  const rfq=lastStep(run,'rfq');
+  const rfqId=(rfq&&rfq.outputs&&rfq.outputs.rfq_id)||'';
+  const detail=(q&&q.detail)||'';
+  box.innerHTML=`<div class="gatebox">
+    <div class="gt">⏸ 停在收集报价：不足最低条数</div>
+    <div class="gb">${esc(detail)}。图不会拿一条报价去定价——低于门槛就停下等人补数据。<br>
+      登记一条供应商报价后从 supplier_quotes 续跑。RFQ：<b>${esc(rfqId||'—')}</b></div>
+    <div class="gacts" style="flex-wrap:wrap">
+      <input id="sqName" placeholder="供应商名称" style="flex:1;min-width:130px">
+      <input id="sqMail" placeholder="报价邮箱" value="ops@oceanline.com" style="flex:1;min-width:150px">
+      <input id="sqOcean" placeholder="海运费 USD" value="1850" style="width:120px">
+      <input id="sqSur" placeholder="附加费" value="240" style="width:100px">
+      <button class="go" onclick="addQuote('${esc(rfqId)}')">登记报价</button>
+      <button onclick="resume()">直接续跑</button>
+    </div></div>`;
+}
+
+async function addQuote(rfqId){
+  if(!rfqId){alert('本次运行没有 RFQ，无法登记报价');return}
+  const body={
+    supplier_name:($('sqName').value||'').trim()||'Demo Ocean Line',
+    supplier_email:($('sqMail').value||'').trim()||'ops@oceanline.com',
+    ocean_freight:Number($('sqOcean').value||0),
+    surcharges:Number($('sqSur').value||0),
+    transit_days:18,
+    reliability_score:0.86
+  };
+  if(!(body.ocean_freight>0)){alert('海运费必须大于 0');return}
+  try{
+    const r=await fetch(`/api/v1/rfqs/${encodeURIComponent(rfqId)}/supplier-quotes`,
+      {method:'POST',headers:H,body:JSON.stringify(body)});
+    const j=await r.json();
+    if(!r.ok)throw new Error(shortErr(j.detail));
+    await resume();
+  }catch(e){alert('登记失败：'+e.message)}
+}
+
+function renderApproval(box,run){
+  const h=lastStep(run,'hitl_review');
+  const o=(h&&h.outputs)||{};
+  const quoteId=o.quote_id||'';
+  box.innerHTML=`<div class="gatebox">
+    <div class="gt">⏸ 停在人工闸门：报价待放行</div>
+    <div class="gb">
+      报价单 <b>${esc(quoteId)}</b>，卖价 <b>USD ${esc(o.sell_amount==null?'—':Number(o.sell_amount).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}))}</b><br>
+      此刻报价<b>尚未发送给客户</b>。未审批的报价在 <span class="kbd">approval.send_quote</span> 里无法发送——
+      这正是需要人判断的地方：价格能否接受、客户是否值得这张单。
+    </div>
+    <div class="gacts">
+      <button class="go" onclick="review('approve','${esc(quoteId)}')">批准并续跑</button>
+      <button onclick="review('reject','${esc(quoteId)}')">驳回</button>
+    </div></div>`;
+}
+
+async function review(action,quoteId){
+  if(!quoteId){alert('没有可审批的报价单');return}
+  try{
+    const r=await fetch(`/api/v1/quotes/${encodeURIComponent(quoteId)}/review`,
+      {method:'POST',headers:H,body:JSON.stringify({action:action,comment:'图编排控制台演示'})});
+    if(!r.ok)throw new Error(shortErr((await r.json()).detail));
+    if(action==='reject'){
+      $('gatebox').innerHTML=`<div class="gatebox" style="background:var(--gray-bg);border-color:var(--line2)">
+        <div class="gt" style="color:var(--ink)">已驳回</div>
+        <div class="gb" style="color:#4A4945">报价未发送，流程终止。续跑会在闸门处再次失败——这是正确行为，不是 bug。</div></div>`;
+      return;
+    }
+    await resume();
+  }catch(e){alert('审批失败：'+e.message)}
+}
+
+/* ---------------- boot ---------------- */
+function clearView(){
+  state.run=null; clearRail();
+  $('trace').innerHTML='<div class="empty">选一张询价单，点「运行状态图」。图会在该停的地方停下，而不是跑到底再报错</div>';
+  $('gatebox').innerHTML='';
+  $('runState').innerHTML='<div class="empty">运行后显示 run_id、状态、停止原因与续跑入口</div>';
+  $('lat').innerHTML='<div class="empty">每个节点在 <span class="kbd">_guarded</span> 包装器里计时，失败路径也计</div>';
+  $('cntTrace').textContent='尚未运行'; $('cntRun').textContent='—'; $('cntLat').textContent='本次运行';
+}
+
+async function reset(){ clearView(); await loadInquiries(); }
+
+/* Reloading the page should not lose the last run: the cursor is persisted, so read it back. */
+async function loadLastRun(){
+  const id=$('inq').value;
+  if(!id)return;
+  try{
+    const r=await fetch('/api/v1/graph/status/'+encodeURIComponent(id),{headers:H});
+    if(!r.ok)return;
+    const j=await r.json();
+    state.inquiryId=id;
+    const partial={run_id:j.run_id,thread_id:'—',inquiry_id:id,status:j.status,
+      stop_reason:j.pending_gate,resume_node:null,steps:j.steps||[],synthetic_quotes_allowed:false};
+    clearRail();
+    (partial.steps||[]).forEach(s=>{
+      const cls=s.status==='ok'?'done':(s.status==='failed'?'failed':(s.status==='skipped'?'skipped':'active'));
+      setNode(s.node,cls);
+    });
+    renderTrace(partial); renderLatency(partial);
+    $('cntRun').textContent=j.status;
+    $('runState').innerHTML=`
+      <div class="kv"><span class="k">运行号</span><span class="v" style="font-family:var(--mono);font-size:11.5px">${esc(j.run_id)}</span></div>
+      <div class="kv"><span class="k">状态</span><span class="v">${esc(j.status)}</span></div>
+      <div class="kv"><span class="k">停在节点</span><span class="v">${esc(j.current_node||'—')}</span></div>
+      <div class="kv"><span class="k">等待</span><span class="v">${esc(j.pending_gate||'—')}</span></div>
+      <div class="note plain" style="margin-top:10px">这是上一次运行的游标（从数据库读回）。重新运行会开一条新的运行记录。</div>`;
+    $('gatebox').innerHTML='';
+  }catch(e){/* history is optional; the runner still works */}
+}
+
+async function boot(){
+  buildRail();
+  $('inq').addEventListener('change',e=>{state.inquiryId=e.target.value; loadLastRun()});
+  await loadInquiries();
+  if($('inq').value)await loadLastRun();
+}
+boot();
+</script>
+</body>
+</html>

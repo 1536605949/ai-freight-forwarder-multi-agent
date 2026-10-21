@@ -126,10 +126,31 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .tabs{display:flex;gap:0;border-bottom:1px solid var(--line)}
 .tab{padding:9px 15px;font-size:12.5px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
 .tab.on{color:var(--ink);border-bottom-color:var(--amber);font-weight:500}
+
+/* top navigation — shared with theme.css so the four demo pages read as one product */
+.topnav{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:18px;
+  padding-bottom:14px;border-bottom:1px solid var(--line)}
+.topnav .brand{font-size:13px;font-weight:600;margin-right:8px;color:var(--ink)}
+.topnav a{padding:5px 11px;border-radius:7px;font-size:12.5px;color:var(--muted);text-decoration:none}
+.topnav a:hover{background:var(--gray-bg);color:var(--ink)}
+.topnav a.on{background:var(--ink);color:#fff}
+.topnav .spacer{flex:1}
+.topnav .env{font-size:11px;color:var(--muted);font-family:ui-monospace,Menlo,Consolas,monospace}
 </style>
 </head>
 <body>
 <div class="wrap">
+
+  <nav class="topnav">
+    <span class="brand">AI Freight Forwarder</span>
+    <a href="index.html">首页</a>
+    <a href="overview.html" class="on">业务闭环</a>
+    <a href="graph.html">图编排</a>
+    <a href="knowledge.html">知识台</a>
+    <a href="prospecting.html">主动获客</a>
+    <span class="spacer"></span>
+    <span class="env">tenant-demo · dev auth</span>
+  </nav>
   <h1>全流程总览 — 一条指令跑通货代业务闭环</h1>
   <div class="sub">询价解析 → 船期 → 运价 → RFQ → 比价 → <b>人工放行</b> → 报价 → 订舱 → 船位跟踪。
     自动化遇到人工闸门会主动停下，绝不越权发信或订舱。</div>
