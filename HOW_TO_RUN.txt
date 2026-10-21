@@ -27,7 +27,7 @@ Makefile 等价入口：make bootstrap / make run / make test / make acceptance
 
 ★ 验证清单（服务启动后，另开终端）
 ----------------------------------
-    pytest -q                                        # 238 passed
+    pytest -q                                        # 240 passed
     ruff check app tests worker evaluation scripts   # All checks passed
     python evaluation/run_eval.py                    # 6/6，全部真实执行
     python evaluation/knowledge_eval.py              # hit@3 95.5%，负例误答 0/12
