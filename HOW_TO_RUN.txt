@@ -43,7 +43,7 @@ Makefile 等价入口：make bootstrap / make run / make test / make acceptance
 
 ★ 验证清单（服务启动后，另开终端）
 ----------------------------------
-    pytest -q                                        # 325 passed
+    pytest -q                                        # 351 passed
     ruff check app tests worker evaluation scripts   # All checks passed
     python evaluation/run_eval.py                    # 6/6，全部真实执行
     python evaluation/knowledge_eval.py              # hit@3 95.5%，负例误答 0/12
@@ -134,7 +134,7 @@ D. 推荐接真实系统顺序
 E. 上线门槛
 -----------
 自动化可验证（CI 已强制）：
-- pytest 全绿（179 passed）
+- pytest 全绿（351 passed）
 - ruff check 全仓零告警
 - critical eval：0 失败 **且 0 未执行**（"未执行"不算通过）
 - cross-tenant isolation PASS
