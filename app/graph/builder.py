@@ -32,6 +32,7 @@ approval. `PipelineGraphRun` persists the cursor instead.
 from __future__ import annotations
 
 import operator
+import time
 from typing import Annotated, TypedDict
 
 from langgraph.graph import END, StateGraph
@@ -84,8 +85,22 @@ class PipelineState(TypedDict, total=False):
     steps: Annotated[list[dict], operator.add]
 
 
-def _step(node: str, status: str = 'ok', detail: str = '', **outputs) -> dict:
-    return {'node': node, 'status': status, 'detail': detail, 'outputs': outputs}
+def _step(node: str, status: str = 'ok', detail: str = '', elapsed_ms: int | None = None,
+          **outputs) -> dict:
+    step = {'node': node, 'status': status, 'detail': detail, 'outputs': outputs}
+    if elapsed_ms is not None:
+        step['elapsed_ms'] = elapsed_ms
+    return step
+
+
+def _ms(started: float) -> int:
+    """Whole milliseconds since `started`, floored at 0.
+
+    Rounded rather than truncated so a fast node does not read as 0 ms purely from
+    float noise; the point of the field is to be honest about a slow node, not to
+    flatter a fast one.
+    """
+    return max(0, round((time.perf_counter() - started) * 1000))
 
 
 def _halted(state: PipelineState) -> bool:
@@ -98,21 +113,50 @@ def _guarded(node: str, handler):
     A `ValueError` from a service is a *result* ("insufficient_supplier_quotes"), not a
     crash. Letting it propagate would abort the graph with a stack trace and lose the trace
     that explains which node refused.
+
+    Every step produced here carries `elapsed_ms`. Timing lives in the wrapper rather than
+    in each node so that adding a node cannot forget it, and so the failure paths are
+    measured too -- a node that fails after 30 seconds is the one worth seeing.
     """
     import inspect
 
     async def wrapped(state: PipelineState) -> dict:
+        started = time.perf_counter()
         try:
             result = handler(state)
             if inspect.isawaitable(result):
                 result = await result
-            return result
         except KeyError as exc:
             return {'status': 'failed', 'stop_reason': f'{node}:not_found:{exc}',
-                    'steps': [_step(node, 'failed', f'not_found: {exc}')]}
+                    'steps': [_step(node, 'failed', f'not_found: {exc}',
+                                    elapsed_ms=_ms(started))]}
         except ValueError as exc:
             return {'status': 'failed', 'stop_reason': f'{node}:{exc}',
-                    'steps': [_step(node, 'failed', str(exc))]}
+                    'steps': [_step(node, 'failed', str(exc), elapsed_ms=_ms(started))]}
+
+        elapsed = _ms(started)
+        for step in result.get('steps') or []:
+            step.setdefault('elapsed_ms', elapsed)
+        return result
+
+    return wrapped
+
+
+def _timed(node: str, handler):
+    """Measure a node that has no business refusal to catch.
+
+    `clarify` only reshapes state, so it has nothing to guard -- but leaving it unmeasured
+    would make it the one node that runs without a timing sample, and a metrics table that
+    silently omits a node is worse than one that reports 0 ms for it.
+    """
+
+    async def wrapped(state: PipelineState) -> dict:
+        started = time.perf_counter()
+        result = handler(state)
+        elapsed = _ms(started)
+        for step in result.get('steps') or []:
+            step.setdefault('elapsed_ms', elapsed)
+        return result
 
     return wrapped
 
@@ -298,7 +342,7 @@ def build_pipeline_graph(*, db, tenant_id: str, actor: str, trace_id: str):
 
     graph = StateGraph(PipelineState)
     graph.add_node('understand', _guarded('understand', understand))
-    graph.add_node('clarify', clarify)
+    graph.add_node('clarify', _timed('clarify', clarify))
     graph.add_node('schedules', _guarded('schedules', schedules))
     graph.add_node('rates', _guarded('rates', rates))
     graph.add_node('rfq', _guarded('rfq', rfq))

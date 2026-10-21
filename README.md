@@ -24,7 +24,7 @@ python scripts/bootstrap_dev.py          # 建 venv + 装依赖 + alembic upgrad
 python -m uvicorn app.main:app --port 8100
 
 # 另开一个终端：
-pytest -q                                # 单元 + 集成：240 passed
+pytest -q                                # 单元 + 集成：259 passed
 python evaluation/run_eval.py            # 行为评测：6/6 通过
 python evaluation/knowledge_eval.py      # 检索评测：hit@3 95.5%，负例误答 0/12
 python scripts/delivery_check.py         # 交付验收：40/40 通过
@@ -50,13 +50,14 @@ curl -s localhost:8100/api/v1/graph/run -H 'content-type: application/json' \
 
 | 项目 | 结果 | 复现命令 |
 |---|---|---|
-| 单元 / 集成测试 | **240 passed** | `pytest -q` |
+| 单元 / 集成测试 | **259 passed** | `pytest -q` |
 | 覆盖率 | **82%** 整体；v2.0 新增模块 **88%** | `pytest --cov=app --cov=worker --cov=evaluation` |
 | 静态检查 | **ruff 全绿**（规则集见 `pyproject.toml`） | `ruff check app tests worker evaluation scripts` |
 | 行为评测 | **6/6**，全部真实执行 | `python evaluation/run_eval.py` |
 | SOP 检索评测 | **hit@1 90.9% / hit@3 95.5% / 负例误答 0** | `python evaluation/knowledge_eval.py` |
 | 交付验收 | **40/40** | `python scripts/delivery_check.py` |
-| API 路由 | **51** | `GET /docs` |
+| API 路由 | **52** | `GET /docs` |
+| 度量口径 | `GET /api/v1/metrics/agent`（p50/p95、token、成本、闸门分布） | 见下方「可观测性」 |
 | 数据表 / 索引 | **23 / 41** | `alembic upgrade head` |
 | 模块循环依赖 | **0** | `tests/test_architecture_asset.py` |
 
@@ -244,6 +245,35 @@ if not spec.read_only:
 - 重试**只对瞬态故障**生效，`ValueError`（业务拒绝）不重试——重试它只是重复烧钱；
 - token 从两种 provider 形态里提取，成本按配置单价计算；**没上报就记 NULL，不记 0**。
   记 0 会让「平均每次成本」这个指标永远好看，从而失去意义。
+
+### 5. 可观测性：把这些字段读回来
+
+上面第 4 条写过「没上报就记 NULL」。但只写不读的字段和不会失败的测试是同一种问题——
+看起来有可观测性，却回答不了任何问题。`app/services/metrics.py` 是那个读取方，
+`GET /api/v1/metrics/agent?days=7` 是出口：
+
+```bash
+curl -s "localhost:8100/api/v1/metrics/agent?days=7" -H 'X-Demo-Tenant: tenant-demo' \
+  -H 'X-Demo-User: u1' | python -m json.tool
+```
+
+返回两块，全部是已有行上的算术，没有一次模型调用：
+
+| 块 | 内容 |
+|---|---|
+| `agents` | 每次运行耗时 p50/p95/max、token 汇总、成本、按 agent 拆分的失败数 |
+| `graph` | 每个节点的 p50/p95、`stop_reason` 分布、`node:status` 计数、有计时的运行数 |
+
+三条口径写在代码里，也写在测试里：
+
+- **未上报 ≠ 0**。没有 token 的运行计入 `unreported_runs` 并**排除**在均值之外，
+  分母是「真正上报了的运行数」（`per_reported_run`），不是全部运行数。
+- **百分位是 nearest-rank，不插值**。只有几次运行的时候，插值出来的 p95 是一个
+  谁都没观测到的数字。空样本返回 `null`，不返回 0。
+- **窗口会被夹住**（上限 90 天），否则一个开着不关的看板就能把整张表扫一遍。
+
+节点耗时记录在 `_guarded` 包装器里而不是各个节点内部：这样新增一个节点不会忘记加计时，
+**失败路径也会被计时**——跑 30 秒才失败的那个节点才是最该看见的。
 
 ---
 
@@ -443,7 +473,7 @@ export OPENAI_CHAT_MODEL=...
 
 ```
 app/
-  main.py            51 条路由；鉴权、错误码映射、demo 页面挂载
+  main.py            52 条路由；鉴权、错误码映射、demo 页面挂载
   state_machine.py   InquiryStatus 迁移图 + advance_status()（唯一真相来源）
   enums.py           状态词汇表
   models.py          23 张表（全部带 tenant_id）
@@ -464,7 +494,7 @@ worker/scheduler.py  跟进任务轮询（支持 --once 用于 cron）
 evaluation/          行为评测（run_eval.py）+ 检索评测（knowledge_eval.py）
 migrations/          Alembic；0001/0002 均为显式冻结快照
 demo_client/         静态演示页
-tests/               240 个测试
+tests/               259 个测试
 docs/                架构、分层、集成、交付、审查文档
 ```
 

@@ -30,6 +30,7 @@ from app.services.supplier_email import parse_and_store_supplier_email
 from app.services import prospecting as prospecting_svc
 from app.services import vessel as vessel_svc
 from app.services import orchestrator as orchestrator_svc
+from app.services.metrics import agent_metrics, graph_metrics
 from app.graph import latest_run as latest_graph_run
 from app.graph import resume_graph, run_graph
 from app.knowledge import answer_question as knowledge_answer
@@ -335,6 +336,14 @@ async def due(db:Session=Depends(get_db),p:Principal=Depends(require_role('admin
 def dashboard(db:Session=Depends(get_db),p:Principal=Depends(current_principal)):
     def count(model): return db.query(model).filter_by(tenant_id=p.tenant_id).count()
     return {'leads':count(Lead),'customers':count(Customer),'inquiries':count(Inquiry),'supplier_quotes':count(SupplierQuote),'customer_quotes':count(CustomerQuote),'bookings':count(Booking),'tracking_events':count(TrackingEvent),'agent_runs':count(AgentRun),'audit_events':count(AuditEvent),'crm_activities':count(CRMActivity),'rate_snapshots':count(RateSnapshot),'prospects':count(ProspectCandidate),'outreach':count(OutreachActivity)}
+
+@app.get('/api/v1/metrics/agent')
+def agent_metrics_route(days:int|None=None,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):
+    """Latency, token and cost accounting. Arithmetic over recorded rows, no model involved."""
+    try:
+        return {'agents':agent_metrics(db,p.tenant_id,days=days),'graph':graph_metrics(db,p.tenant_id,days=days)}
+    except ValueError as exc:
+        raise HTTPException(status_code=422,detail=str(exc))
 
 def _row(x):
     return {c.name:getattr(x,c.name) for c in x.__table__.columns}

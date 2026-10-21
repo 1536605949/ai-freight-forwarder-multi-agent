@@ -65,6 +65,7 @@
 ./app/services/inquiry.py
 ./app/services/lead.py
 ./app/services/lead_outreach.py
+./app/services/metrics.py
 ./app/services/orchestrator.py
 ./app/services/pricing.py
 ./app/services/prospecting.py
@@ -131,6 +132,7 @@
 ./tests/test_config_docs.py
 ./tests/test_delivery_check.py
 ./tests/test_demo_contract.py
+./tests/test_doc_claims.py
 ./tests/test_eval_harness.py
 ./tests/test_followup_compliance.py
 ./tests/test_graph_pipeline.py
@@ -138,6 +140,7 @@
 ./tests/test_knowledge.py
 ./tests/test_lead.py
 ./tests/test_maf_workflows.py
+./tests/test_metrics.py
 ./tests/test_migrations.py
 ./tests/test_orchestrator.py
 ./tests/test_packaging.py

@@ -27,7 +27,7 @@ Makefile 等价入口：make bootstrap / make run / make test / make acceptance
 
 ★ 验证清单（服务启动后，另开终端）
 ----------------------------------
-    pytest -q                                        # 240 passed
+    pytest -q                                        # 259 passed
     ruff check app tests worker evaluation scripts   # All checks passed
     python evaluation/run_eval.py                    # 6/6，全部真实执行
     python evaluation/knowledge_eval.py              # hit@3 95.5%，负例误答 0/12
@@ -42,6 +42,9 @@ Agent 部分怎么验（服务启动后）：
          -d '{"query":"员工年假有多少天"}'        # answered=false（拒答是正确行为）
     curl -s localhost:8100/api/v1/graph/run -H 'content-type: application/json' \
          -d '{"inquiry_id":"<inq_id>"}'          # 跑到 waiting_approval 停下
+    curl -s "localhost:8100/api/v1/metrics/agent?days=7" \
+         -H 'X-Demo-Tenant: tenant-demo' -H 'X-Demo-User: u1'
+                                                 # 延迟 p50/p95、token、成本、闸门分布
 
 评测脚本的设计要点：**没执行的用例不算通过**。退出码 1 的条件是
 「critical 用例失败」或「critical 用例从未执行」。未知 kind/rule 一律 FAIL。
