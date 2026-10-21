@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.models import AgentRun
 from app.metrics import AGENT_RUNS, AGENT_LATENCY
+from app.agents.resilience import Usage, call_with_retry, estimate_cost, extract_usage
 
 @dataclass
 class AgentResult:
@@ -36,13 +37,20 @@ class MockAgentRuntime(AgentRuntime):
 class MicrosoftAgentFrameworkRuntime(AgentRuntime):
     async def run(self, db, tenant_id, trace_id, name, instructions, prompt, expect_json=False):
         started=time.perf_counter()
+        usage=Usage()
         try:
             from agent_framework import Agent
             from agent_framework.openai import OpenAIChatClient
             s=get_settings()
             client=OpenAIChatClient(model=s.openai_chat_model) if s.openai_chat_model else OpenAIChatClient()
             agent=Agent(client=client,name=name,instructions=instructions)
-            result=await agent.run(prompt)
+            # A hung provider must not hold a worker slot forever, and a transient 429 should
+            # not surface to the user as a failed quote. Business refusals (ValueError) are
+            # not retried -- see app/agents/resilience.py.
+            result=await call_with_retry(lambda: agent.run(prompt),
+                                         timeout=s.llm_timeout_seconds,
+                                         retries=s.llm_max_retries)
+            usage=extract_usage(result, model=s.openai_chat_model)
             text=str(result)
             data=None
             if expect_json:
@@ -54,8 +62,21 @@ class MicrosoftAgentFrameworkRuntime(AgentRuntime):
             raise
         finally:
             elapsed=time.perf_counter()-started
-            db.add(AgentRun(id=str(uuid.uuid4()),tenant_id=tenant_id,agent_name=name,trace_id=trace_id,input_summary=prompt[:500],output_summary=text[:1000] if 'text' in locals() else None,status=status,latency_ms=int(elapsed*1000))); db.commit()
+            db.add(AgentRun(id=str(uuid.uuid4()),tenant_id=tenant_id,agent_name=name,trace_id=trace_id,input_summary=prompt[:500],output_summary=text[:1000] if 'text' in locals() else None,status=status,latency_ms=int(elapsed*1000),
+                            prompt_tokens=usage.prompt_tokens,completion_tokens=usage.completion_tokens,
+                            model=usage.model,cost_usd=_cost(usage))); db.commit()
             AGENT_RUNS.labels(name,status).inc(); AGENT_LATENCY.labels(name).observe(elapsed)
+
+def _cost(usage:Usage)->float|None:
+    """USD cost, or None when the provider reported no tokens.
+
+    Prices default to 0 and are treated as "not configured" rather than "free": writing 0.0
+    would make every run look cost-free, which is the decorative-dashboard failure.
+    """
+    s=get_settings()
+    if not (s.llm_prompt_price_per_1k or s.llm_completion_price_per_1k): return None
+    return estimate_cost(usage,prompt_price_per_1k=s.llm_prompt_price_per_1k,
+                         completion_price_per_1k=s.llm_completion_price_per_1k)
 
 def get_runtime() -> AgentRuntime:
     return MicrosoftAgentFrameworkRuntime() if get_settings().agent_provider=='maf_openai' else MockAgentRuntime()

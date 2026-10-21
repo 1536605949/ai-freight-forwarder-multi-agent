@@ -11,6 +11,9 @@ tenacity==9.1.2
 email-validator==2.3.0
 psycopg[binary]==3.2.9
 alembic>=1.16,<2
+# Orchestration. Pinned because the workflow graph is part of the product, not an optional
+# extra: the conditional routing and gate-aware resume in app/graph depend on it.
+langgraph>=1.2,<2
 # NOTE: agent-framework is intentionally NOT pinned here. It conflicts with the fastapi
 # pin above (pip: ResolutionImpossible). It is an *optional* dependency, lazily imported
 # inside app/agents/runtime.py and app/agents/maf_workflows.py, and is required only when

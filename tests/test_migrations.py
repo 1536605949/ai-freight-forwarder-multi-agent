@@ -29,7 +29,7 @@ import app.models  # noqa: F401  (registers every table on Base.metadata)
 from app.db import Base
 
 ROOT = Path(__file__).resolve().parents[1]
-MIGRATION = ROOT / 'migrations' / 'versions' / '0001_initial.py'
+MIGRATIONS = sorted((ROOT / 'migrations' / 'versions').glob('*.py'))
 
 # SQLite reflects `sa.String(64)` back as VARCHAR, so types are compared by family.
 _TYPE_FAMILY = {
@@ -63,23 +63,33 @@ def alembic_cfg(tmp_path, monkeypatch):
 # The migration must be a snapshot, not an introspection
 # --------------------------------------------------------------------------- #
 
-def test_migration_does_not_call_metadata_create_or_drop_all():
-    """AST-checked, so prose in the docstring is not mistaken for a call."""
-    tree = ast.parse(MIGRATION.read_text(encoding='utf-8'))
-    offenders = [
-        node.func.attr
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr in {'create_all', 'drop_all'}
-    ]
-    assert not offenders, f'migration must not call {offenders}; write the DDL out explicitly'
+def test_no_migration_calls_metadata_create_or_drop_all():
+    """AST-checked across every revision, so prose in a docstring is not mistaken for a call.
+
+    Checking only the first file let a later revision reintroduce the introspection it was
+    written to remove.
+    """
+    assert MIGRATIONS, 'no migration files found'
+    problems: list[str] = []
+    for path in MIGRATIONS:
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+        offenders = [
+            node.func.attr
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {'create_all', 'drop_all'}
+        ]
+        if offenders:
+            problems.append(f'{path.name}: {offenders}')
+    assert not problems, f'migrations must not introspect the models: {problems}'
 
 
-def test_migration_declares_both_directions():
-    tree = ast.parse(MIGRATION.read_text(encoding='utf-8'))
-    defined = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
-    assert {'upgrade', 'downgrade'} <= defined
+def test_every_migration_declares_both_directions():
+    for path in MIGRATIONS:
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+        defined = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
+        assert {'upgrade', 'downgrade'} <= defined, f'{path.name} is not reversible'
 
 
 # --------------------------------------------------------------------------- #
@@ -249,10 +259,16 @@ def test_alembic_revision_reports_nothing_for_a_database_alembic_does_not_own(
 
 
 def test_alembic_revision_reports_the_revision_once_migrated(alembic_cfg):
+    from alembic.script import ScriptDirectory
+
     from scripts.bootstrap_dev import _alembic_revision
 
     cfg, _url = alembic_cfg
     command.upgrade(cfg, 'head')
 
-    assert _alembic_revision(Path(sys.executable)) == '0001_initial'
+    # Compared against the script directory's head, not a hardcoded id: the assertion is
+    # "the database is at head", and pinning '0001_initial' made adding a migration look
+    # like a regression.
+    expected = ScriptDirectory.from_config(cfg).get_current_head()
+    assert _alembic_revision(Path(sys.executable)) == expected
 

@@ -311,7 +311,7 @@ else:
 
 
 def seed(py: Path) -> None:
-    Log.step(5, 6, "Seeding demo data")
+    Log.step(5, 6, "Seeding demo data + SOP knowledge base")
     snippet = """
 import sys
 sys.path.insert(0, '.')
@@ -321,9 +321,16 @@ db = SessionLocal()
 if db.get(Tenant, 'tenant-demo') is None:
     db.add(Tenant(id='tenant-demo', name='Demo Freight Forwarder'))
     db.commit()
-    print('created')
+    print('tenant created')
 else:
-    print('exists')
+    print('tenant exists')
+# The SOP corpus is part of the demo data: without it the knowledge endpoints refuse every
+# question, which looks like a bug rather than an unseeded corpus. Seeding is idempotent
+# (checksum-keyed), so re-running bootstrap does not duplicate chunks.
+from app.knowledge.service import seed_corpus
+results = seed_corpus(db, 'tenant-demo')
+print(f'knowledge: {sum(1 for r in results if r.created)} new, '
+      f'{sum(1 for r in results if not r.created)} already present')
 db.close()
 """
     proc = _load_app_modules(py, snippet)

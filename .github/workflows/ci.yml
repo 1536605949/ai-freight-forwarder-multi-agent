@@ -19,6 +19,12 @@ jobs:
    - name: tests
      run: pytest -q
 
+   # Retrieval quality and, more importantly, the refusal path: any out-of-domain question
+   # that gets answered fails this step. A confident wrong SOP answer is the failure mode
+   # that causes operational damage, so it is gated rather than reported.
+   - name: retrieval eval
+     run: python evaluation/knowledge_eval.py
+
    # Proves the packaging invariant: `agent-framework` must stay out of requirements.txt,
    # or the Docker build and every plain install break.
    - name: packaging invariants

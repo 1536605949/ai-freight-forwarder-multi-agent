@@ -33,6 +33,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.models import CustomerQuote, Inquiry, RFQ, SupplierQuote
 from app.services import approval as approval_svc
 from app.services import booking as booking_svc
@@ -115,7 +116,7 @@ async def run_pipeline(
     inquiry_id: str,
     *,
     start_stage: str = 'parse',
-    auto_supplier_quotes: bool = True,
+    auto_supplier_quotes: bool | None = None,
     vessel_name: str | None = None,
     auto_approve: bool = False,
 ) -> PipelineRun:
@@ -123,11 +124,22 @@ async def run_pipeline(
 
     Args:
         auto_supplier_quotes: seed synthetic supplier quotes so the pricing comparison has
-            something to compare. Demo/test convenience — a real deployment receives these
-            from the supplier mailbox webhook instead.
-        auto_approve: skip the human gate. **Only legitimate in a demo/test**, never in
-            production. Defaults to False, and the caller must opt in explicitly.
+            something to compare. `None` means "decide by environment": on outside
+            production (so the demo runs), always off inside it. A production caller cannot
+            get synthetic quotes into a real quote comparison by omitting a flag, which is
+            what the previous `default=True` allowed.
+        auto_approve: skip the human gate. **Only legitimate in a demo/test.** Raising here
+            rather than silently ignoring it is deliberate: a production caller that asks to
+            bypass approval has a bug, and quietly doing the safe thing would hide it.
     """
+    s = get_settings()
+    if auto_approve and s.environment == 'production':
+        raise ValueError('auto_approve_not_permitted_in_production')
+    if auto_supplier_quotes is None:
+        auto_supplier_quotes = s.environment != 'production'
+    elif auto_supplier_quotes and s.environment == 'production':
+        raise ValueError('synthetic_quotes_not_permitted_in_production')
+
     run_id = uid('run_')
     trace: list[StageResult] = []
     started = STAGES.index(start_stage) if start_stage in STAGES else 0

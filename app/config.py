@@ -56,6 +56,34 @@ class Settings(BaseSettings):
     ais_token: str | None = None
     # A delay beyond this threshold raises a proactive customer notification task.
     vessel_delay_alert_hours: float = 12.0
+    # Demo-only shortcuts (synthetic supplier quotes, auto-approve at the human gate).
+    # Kept as an explicit setting so production can refuse them outright instead of trusting
+    # every caller to pass the right flag.
+    allow_demo_shortcuts: bool = False
+    # Knowledge base / RAG. 'hashing' is deterministic and offline; 'openai' needs a key.
+    embedding_provider: str = 'hashing'
+    embedding_model: str = 'text-embedding-3-small'
+    embedding_base_url: str | None = None
+    embedding_api_key: str | None = None
+    knowledge_top_k: int = 5
+    # Bounded final retrieval score below which the agent refuses instead of guessing.
+    #
+    # Responsibilities are split deliberately: questions the corpus does not speak about are
+    # refused upstream by the character-coverage gate in retrieval.py (they return no
+    # candidates at all), so this threshold only decides "in-domain but weakly matched".
+    # Calibrated on the bundled corpus: short questions score 0.59-0.85, long natural
+    # sentences 0.41-0.59, out-of-domain 0.00 (gated). Set below the long-sentence band so a
+    # verbose but answerable question is not refused.
+    knowledge_min_score: float = 0.38
+    # LLM call discipline. Without a timeout a single hung provider stalls the worker forever.
+    llm_timeout_seconds: float = 30.0
+    llm_max_retries: int = 2
+    # Hard ceiling on tool-calling rounds, so a model that keeps asking cannot loop forever.
+    agent_max_tool_steps: int = 4
+    # Per-1k token prices. Left at 0 = "not configured", in which case cost is recorded as
+    # NULL rather than 0.0 (a free-looking dashboard is worse than no dashboard).
+    llm_prompt_price_per_1k: float = 0.0
+    llm_completion_price_per_1k: float = 0.0
 
 @lru_cache
 def get_settings() -> Settings:

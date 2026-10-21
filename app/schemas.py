@@ -51,9 +51,10 @@ class OrchestrateIn(BaseModel):
     # Resume from a stage instead of the beginning. Validated against STAGES at the route.
     start_stage:str|None=None
     # Demo/test convenience: seed synthetic supplier quotes. Real deployments receive these
-    # through the supplier-mailbox webhook instead.
-    auto_supplier_quotes:bool=True
-    # Demo/test only. Skips the human approval gate. Must be explicitly requested.
+    # through the supplier-mailbox webhook instead. `None` = decide by environment: on for
+    # demo/test (so the pipeline is runnable), forced off in production.
+    auto_supplier_quotes:bool|None=None
+    # Demo/test only. Skips the human approval gate. Refused outright in production.
     auto_approve:bool=False
     vessel_name:str|None=None
 
@@ -61,4 +62,42 @@ class OrchestrateContinueIn(BaseModel):
     """Continue after a human decision at a gate."""
     quote_id:str
     vessel_name:str|None=None
+
+class KnowledgeDocumentIn(BaseModel):
+    title:str=Field(min_length=1,max_length=300)
+    text:str=Field(min_length=1)
+    source:str='manual'
+    version:str='1'
+
+class KnowledgeQueryIn(BaseModel):
+    query:str=Field(min_length=1)
+    # Optional override of the configured top-k. Bounded so a caller cannot ask for the
+    # whole corpus and turn retrieval into a dump.
+    k:int|None=Field(default=None,ge=1,le=20)
+
+class GraphRunIn(BaseModel):
+    """Start the LangGraph pipeline on an existing inquiry."""
+    inquiry_id:str
+    start_node:str='understand'
+    vessel_name:str|None=None
+    # Demo only. Ignored in production -- see graph/runner._effective_demo_shortcuts.
+    allow_synthetic_quotes:bool|None=None
+
+class GraphResumeIn(BaseModel):
+    """Re-enter a halted graph run at the node it stopped at.
+
+    No `start_node` here on purpose: the resume point is derived from persisted state, so a
+    client cannot ask to skip a gate by naming the node after it.
+    """
+    inquiry_id:str
+    vessel_name:str|None=None
+
+class AgentAskIn(BaseModel):
+    """Ask the tool-calling agent a question.
+
+    `inquiry_id` is optional and only a hint: the policy also reads it from the question
+    text, and every tool re-checks it against the caller's tenant.
+    """
+    question:str=Field(min_length=1)
+    inquiry_id:str|None=None
 

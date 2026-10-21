@@ -27,12 +27,21 @@ Makefile 等价入口：make bootstrap / make run / make test / make acceptance
 
 ★ 验证清单（服务启动后，另开终端）
 ----------------------------------
-    pytest -q                                        # 189 passed
+    pytest -q                                        # 238 passed
     ruff check app tests worker evaluation scripts   # All checks passed
     python evaluation/run_eval.py                    # 6/6，全部真实执行
+    python evaluation/knowledge_eval.py              # hit@3 95.5%，负例误答 0/12
     python scripts/delivery_check.py                 # 40/40
     python -m alembic upgrade head                   # 迁移可用
-    sha256sum -c SHA256SUMS.txt                      # 130/130 OK（Linux/macOS/Git Bash）
+    sha256sum -c SHA256SUMS.txt                      # 全部 OK（Linux/macOS/Git Bash）
+
+Agent 部分怎么验（服务启动后）：
+    curl -s localhost:8100/api/v1/knowledge/answer -H 'content-type: application/json' \
+         -d '{"query":"甩柜了怎么处理"}'          # 带 citations 的回答
+    curl -s localhost:8100/api/v1/knowledge/answer -H 'content-type: application/json' \
+         -d '{"query":"员工年假有多少天"}'        # answered=false（拒答是正确行为）
+    curl -s localhost:8100/api/v1/graph/run -H 'content-type: application/json' \
+         -d '{"inquiry_id":"<inq_id>"}'          # 跑到 waiting_approval 停下
 
 评测脚本的设计要点：**没执行的用例不算通过**。退出码 1 的条件是
 「critical 用例失败」或「critical 用例从未执行」。未知 kind/rule 一律 FAIL。

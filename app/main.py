@@ -8,10 +8,10 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from app.db import Base,engine,get_db
 from app.auth import current_principal,Principal,require_role
 from app.schemas import (
-    ApprovalIn, BookingCreate, CRMActivityCreate, FollowUpCreate, InboundMessage,
-    InquiryPatch, LeadCreate, OptOutIn, OrchestrateContinueIn, OrchestrateIn,
-    OutreachApproveIn, OutreachDraftIn, PromoteIn, ProspectSearchIn, SupplierInboundEmail,
-    SupplierQuoteIn, TrackingWebhook,
+    AgentAskIn, ApprovalIn, BookingCreate, CRMActivityCreate, FollowUpCreate, GraphResumeIn,
+    GraphRunIn, InboundMessage, InquiryPatch, KnowledgeDocumentIn, KnowledgeQueryIn, LeadCreate,
+    OptOutIn, OrchestrateContinueIn, OrchestrateIn, OutreachApproveIn, OutreachDraftIn,
+    PromoteIn, ProspectSearchIn, SupplierInboundEmail, SupplierQuoteIn, TrackingWebhook,
 )
 from app.services.lead import create_lead
 from app.services.inquiry import ingest_message,patch_inquiry
@@ -30,6 +30,13 @@ from app.services.supplier_email import parse_and_store_supplier_email
 from app.services import prospecting as prospecting_svc
 from app.services import vessel as vessel_svc
 from app.services import orchestrator as orchestrator_svc
+from app.graph import latest_run as latest_graph_run
+from app.graph import resume_graph, run_graph
+from app.knowledge import answer_question as knowledge_answer
+from app.knowledge import search_knowledge, seed_corpus
+from app.knowledge.service import ingest_document
+from app.agents.tool_loop import run_tool_loop
+from app.agents.tools import ToolContext
 from app.providers.tracking import get_tracking_provider
 from app.models import Inquiry,SupplierQuote,CustomerQuote,Booking,TrackingEvent,Lead,Customer,AgentRun,AuditEvent,CRMActivity,RateSnapshot,ProspectCandidate,OutreachActivity
 from app.metrics import REQUESTS
@@ -264,6 +271,62 @@ def orchestrate_status(inquiry_id:str,db:Session=Depends(get_db),p:Principal=Dep
 
 @app.get('/api/v1/orchestrate/stages')
 def orchestrate_stages(): return {'stages':orchestrator_svc.STAGES,'gated':sorted(orchestrator_svc.GATED_STAGES),'auto':sorted(orchestrator_svc.AUTO_STAGES)}
+
+# --- LangGraph pipeline: conditional routing, durable cursor, gate-aware resume ---------
+@app.post('/api/v1/graph/run')
+async def graph_run(x:GraphRunIn,request:Request,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):
+    try:
+        run=await run_graph(db,p.tenant_id,p.user_id,request.state.trace_id,x.inquiry_id,
+                            start_node=x.start_node,vessel_name=x.vessel_name,
+                            allow_synthetic_quotes=x.allow_synthetic_quotes)
+        return run.as_dict()
+    except KeyError:raise HTTPException(404,'not found')
+    except ValueError as e:raise HTTPException(422,str(e))
+
+@app.post('/api/v1/graph/resume')
+async def graph_resume(x:GraphResumeIn,request:Request,db:Session=Depends(get_db),p:Principal=Depends(require_role('reviewer'))):
+    """Resume a halted run. The node is derived from persisted state, not from the request."""
+    try:
+        return (await resume_graph(db,p.tenant_id,p.user_id,request.state.trace_id,x.inquiry_id,
+                                   vessel_name=x.vessel_name)).as_dict()
+    except KeyError:raise HTTPException(404,'no run for this inquiry')
+    except ValueError as e:raise HTTPException(409,str(e))
+
+@app.get('/api/v1/graph/status/{inquiry_id}')
+def graph_status(inquiry_id:str,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):
+    row=latest_graph_run(db,p.tenant_id,inquiry_id)
+    if not row:raise HTTPException(404,'no run for this inquiry')
+    return {'run_id':row.id,'status':row.status,'current_node':row.current_node,
+            'pending_gate':row.pending_gate,'steps':row.steps}
+
+# --- SOP knowledge base (RAG): cited answers, explicit refusal --------------------------
+@app.post('/api/v1/knowledge/documents')
+def knowledge_ingest(x:KnowledgeDocumentIn,db:Session=Depends(get_db),p:Principal=Depends(require_role('admin'))):
+    try:return ingest_document(db,p.tenant_id,title=x.title,text=x.text,source=x.source,version=x.version).as_dict()
+    except ValueError as e:raise HTTPException(422,str(e))
+
+@app.post('/api/v1/knowledge/seed')
+def knowledge_seed(db:Session=Depends(get_db),p:Principal=Depends(require_role('admin'))):
+    """Load the bundled SOP corpus. Idempotent: re-seeding creates no duplicates."""
+    results=seed_corpus(db,p.tenant_id)
+    return {'documents':len(results),'created':sum(1 for r in results if r.created),
+            'results':[r.as_dict() for r in results]}
+
+@app.post('/api/v1/knowledge/search')
+def knowledge_search(x:KnowledgeQueryIn,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):
+    hits=search_knowledge(db,p.tenant_id,x.query,k=x.k)
+    return {'query':x.query,'count':len(hits),'hits':[h.as_dict() for h in hits]}
+
+@app.post('/api/v1/knowledge/answer')
+def knowledge_ask(x:KnowledgeQueryIn,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):
+    return knowledge_answer(db,p.tenant_id,x.query,k=x.k).as_dict()
+
+# --- Tool-calling agent: read-only tools only, bounded step budget ----------------------
+@app.post('/api/v1/agent/ask')
+async def agent_ask(x:AgentAskIn,request:Request,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):
+    ctx=ToolContext(db=db,tenant_id=p.tenant_id,actor=p.user_id,trace_id=request.state.trace_id)
+    question=x.question if not x.inquiry_id else f"{x.question} ({x.inquiry_id})"
+    return (await run_tool_loop(question,ctx)).as_dict()
 
 @app.post('/internal/run-due-followups')
 async def due(db:Session=Depends(get_db),p:Principal=Depends(require_role('admin'))): return {'processed':await process_due(db)}

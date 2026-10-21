@@ -190,7 +190,66 @@ class AgentRun(Base):
     id:Mapped[str]=mapped_column(String(64), primary_key=True); tenant_id:Mapped[str]=mapped_column(String(64), index=True)
     agent_name:Mapped[str]=mapped_column(String(100)); trace_id:Mapped[str]=mapped_column(String(64), index=True); input_summary:Mapped[str]=mapped_column(Text)
     output_summary:Mapped[str|None]=mapped_column(Text, nullable=True); status:Mapped[str]=mapped_column(String(40)); latency_ms:Mapped[int]=mapped_column(Integer, default=0)
+    # Token accounting. Nullable because the mock runtime consumes no tokens -- writing 0
+    # there would make "average cost per run" look excellent for the wrong reason.
+    prompt_tokens:Mapped[int|None]=mapped_column(Integer, nullable=True)
+    completion_tokens:Mapped[int|None]=mapped_column(Integer, nullable=True)
+    cost_usd:Mapped[float|None]=mapped_column(Float, nullable=True)
+    model:Mapped[str|None]=mapped_column(String(120), nullable=True)
     created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True), default=now)
+
+
+class KnowledgeDocument(Base):
+    """An SOP document owned by one tenant.
+
+    `checksum` is over the normalised text, and it is unique per tenant: re-ingesting the
+    same document is a no-op rather than a duplicate. Without that, a nightly seed job
+    silently multiplies every chunk and the retrieval score distribution drifts.
+    """
+    __tablename__='knowledge_documents'
+    id:Mapped[str]=mapped_column(String(64), primary_key=True); tenant_id:Mapped[str]=mapped_column(String(64), index=True)
+    title:Mapped[str]=mapped_column(String(300)); source:Mapped[str]=mapped_column(String(200), default='manual')
+    version:Mapped[str]=mapped_column(String(40), default='1')
+    checksum:Mapped[str]=mapped_column(String(64)); content:Mapped[str]=mapped_column(Text)
+    chunk_count:Mapped[int]=mapped_column(Integer, default=0)
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True), default=now)
+    __table_args__=(UniqueConstraint('tenant_id','checksum',name='uq_knowledge_document_checksum'),)
+
+
+class KnowledgeChunk(Base):
+    __tablename__='knowledge_chunks'
+    id:Mapped[str]=mapped_column(String(64), primary_key=True); tenant_id:Mapped[str]=mapped_column(String(64), index=True)
+    document_id:Mapped[str]=mapped_column(String(64), ForeignKey('knowledge_documents.id'), index=True)
+    ordinal:Mapped[int]=mapped_column(Integer); heading:Mapped[str|None]=mapped_column(String(300), nullable=True)
+    text:Mapped[str]=mapped_column(Text)
+    # Stored as a JSON list of floats. Fine for a few thousand chunks; a dedicated vector
+    # store is the right answer past that, and the retrieval interface is narrow enough
+    # that swapping it does not touch the service layer.
+    embedding:Mapped[list]=mapped_column(JSON, default=list)
+    embedding_model:Mapped[str]=mapped_column(String(120))
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True), default=now)
+
+
+class PipelineGraphRun(Base):
+    """Durable cursor for a LangGraph execution.
+
+    The graph itself is re-entered per invocation; this row is what survives a process
+    restart. Deliberately *not* an in-memory checkpointer: an in-memory checkpoint is lost
+    on deploy, and a workflow that has been waiting for human approval for two hours must
+    survive a deploy. Business state still lives in the domain tables -- this row only
+    records where the graph stopped and what it was waiting for.
+    """
+    __tablename__='pipeline_graph_runs'
+    id:Mapped[str]=mapped_column(String(64), primary_key=True); tenant_id:Mapped[str]=mapped_column(String(64), index=True)
+    inquiry_id:Mapped[str]=mapped_column(String(64), ForeignKey('inquiries.id'), index=True)
+    thread_id:Mapped[str]=mapped_column(String(64), index=True)
+    status:Mapped[str]=mapped_column(String(40), default='running')
+    current_node:Mapped[str|None]=mapped_column(String(60), nullable=True)
+    pending_gate:Mapped[str|None]=mapped_column(String(60), nullable=True)
+    steps:Mapped[list]=mapped_column(JSON, default=list)
+    state:Mapped[dict]=mapped_column(JSON, default=dict)
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True), default=now)
+    updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
 class AuditEvent(Base):
     __tablename__='audit_events'

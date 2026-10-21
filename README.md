@@ -24,10 +24,23 @@ python scripts/bootstrap_dev.py          # 建 venv + 装依赖 + alembic upgrad
 python -m uvicorn app.main:app --port 8100
 
 # 另开一个终端：
-pytest -q                                # 单元 + 集成：189 passed
+pytest -q                                # 单元 + 集成：238 passed
 python evaluation/run_eval.py            # 行为评测：6/6 通过
+python evaluation/knowledge_eval.py      # 检索评测：hit@3 95.5%，负例误答 0/12
 python scripts/delivery_check.py         # 交付验收：40/40 通过
-sha256sum -c SHA256SUMS.txt              # 完整性校验：130/130 OK
+sha256sum -c SHA256SUMS.txt              # 完整性校验：全部 OK
+```
+
+想直接看 Agent 部分，不需要跑完整流程：
+
+```bash
+# 带引用的 SOP 回答（拒答也是合法结果）
+curl -s localhost:8100/api/v1/knowledge/answer -H 'content-type: application/json' \
+  -d '{"query":"甩柜了怎么处理"}' | python -m json.tool
+
+# LangGraph 图编排：跑到人工闸门停下
+curl -s localhost:8100/api/v1/graph/run -H 'content-type: application/json' \
+  -d '{"inquiry_id":"<inq_id>"}' | python -m json.tool
 ```
 
 打开 <http://localhost:8100/demo/overview.html>，点「运行完整流程」——
@@ -37,14 +50,14 @@ sha256sum -c SHA256SUMS.txt              # 完整性校验：130/130 OK
 
 | 项目 | 结果 | 复现命令 |
 |---|---|---|
-| 单元 / 集成测试 | **189 passed** | `pytest -q` |
-| 覆盖率 | **83%**（`app` + `worker` + `evaluation`） | `pytest --cov=app --cov=worker --cov=evaluation` |
+| 单元 / 集成测试 | **238 passed** | `pytest -q` |
+| 覆盖率 | **82%** 整体；新增 Agent 模块 **88%** | `pytest --cov=app --cov=worker --cov=evaluation` |
 | 静态检查 | **ruff 全绿**（规则集见 `pyproject.toml`） | `ruff check app tests worker evaluation scripts` |
 | 行为评测 | **6/6**，全部真实执行 | `python evaluation/run_eval.py` |
+| SOP 检索评测 | **hit@1 90.9% / hit@3 95.5% / 负例误答 0** | `python evaluation/knowledge_eval.py` |
 | 交付验收 | **40/40** | `python scripts/delivery_check.py` |
-| 完整性校验 | **130/130 OK** | `sha256sum -c SHA256SUMS.txt` |
-| API 路由 | **43** | `GET /docs` |
-| 数据表 / 索引 | **20 / 35** | `alembic upgrade head` |
+| API 路由 | **51** | `GET /docs` |
+| 数据表 / 索引 | **23 / 41** | `alembic upgrade head` |
 | 模块循环依赖 | **0** | `tests/test_architecture_asset.py` |
 
 > 上述数字都是本仓库当前代码实测所得，不是目标值。跑一遍即可复核。
@@ -140,6 +153,97 @@ EXIT=1
 
 `tests/test_eval_harness.py` 用注入式假客户端把这类变异固化成回归测试——
 一个**不能失败**的评测脚本比没有评测脚本更危险，因为它制造虚假信心。
+
+---
+
+## 从业务流水线到 Agent 系统（v2.0）
+
+v1.0 是一个**有 Agent 角色的业务流程引擎**：状态机、确定性定价、审批闸门都在，
+但编排是固定循环，没有条件分支，没有检索，没有模型选工具。v2.0 补的是这三件事，
+而且每一件都接进了**真实执行路径**，不是旁挂的示例。
+
+### 1. LangGraph 条件路由与可恢复的闸门
+
+`app/services/orchestrator.py` 是线性阶段循环；`app/graph/` 是带分支的状态图。
+图解决的是线性循环做不到的四件事：
+
+| 场景 | 线性循环 | 状态图 |
+|---|---|---|
+| 询价字段不全 | 走完全部阶段再失败 | `understand → clarify` 立即停，返回缺失字段 |
+| 供应商报价不足 | 用 1 条报价就定价 | `supplier_quotes` 停，`waiting_supplier_quotes` |
+| 人工审批 | 抛异常中断 | `hitl_review` 节点两个出口，`waiting_approval` |
+| 审批后继续 | 另写一条「继续」代码 | 条件入口点从停止的节点重新进入 |
+
+```python
+graph.add_conditional_edges(
+    'supplier_quotes', _next('optimize'), {'optimize': 'optimize', END: END})
+graph.set_conditional_entry_point(_entry, {n: n for n in ENTRY_NODES})
+```
+
+**没有用内存 checkpointer，这是有意的。** 一张报价单可能等审批两小时，中间会经历一次
+发布；内存里的 checkpoint 必然丢失。所以持久化的是 `pipeline_graph_runs` 里的**游标**，
+业务状态仍然只存在于领域表里——避免出现第二个真相来源。
+
+写测试时抓到一个真实缺陷：`quote_send` 用的是普通边而不是条件边，所以审批闸门失败后
+图**仍然继续去订舱**，只在订舱处才第二次失败。`test_resume_without_approval_fails_at_the_gate_and_does_not_send`
+现在守住这一点。
+
+### 2. SOP 知识库：带引用的回答与**明确的拒答**
+
+`app/knowledge/` 是一套完整的检索链路：标题感知切片 → 向量 + BM25 → 融合 → 重排 →
+有界打分 → 抽取式作答 + 引用。
+
+真正花时间的不是「能答」，而是「知道什么时候不答」。第一版用 RRF（倒数排名融合）打分，
+结果 `公司食堂几点开饭` 拿到 0.67 —— 因为 RRF 只看**名次**，而任何语料里总有一个排第一。
+最终把两件事拆开：
+
+- **排序**：BM25 + 余弦 + RRF，负责谁更相关；
+- **充分性**：idf 加权词覆盖 + 词法强度 + 余弦构成的**绝对分**，不依赖语料里还有什么。
+
+再叠一道**域外门**：查询里有多少字被语料认识的领域词覆盖。低于 35% 直接返回空，
+根本不进入打分。这样 `员工年假有多少天`、`Python 的 GIL 是什么` 在门口就被拒掉。
+
+实测（`evaluation/knowledge_eval.py`，22 正例 / 12 负例）：
+
+| 指标 | 结果 |
+|---|---|
+| hit@1 | **90.9%** |
+| hit@3 | **95.5%** |
+| MRR | **0.932** |
+| 负例误答 | **0 / 12** |
+
+> 22 条正例的 95% 是**回归护栏**，不是质量保证。脚本会把样本量一起打印出来，
+> 就是为了防止有人把它读成「检索准确率 95%」。
+
+默认 embedding 是**确定性的哈希向量**，不是神经模型：无需 Key、可离线、可复现。
+它本质是平滑过的词法匹配，跨不过「滞箱费 ↔ demurrage」这类同义改写——
+这也是 `EMBEDDING_PROVIDER=openai` 存在的理由。**这一点写在代码注释里，不藏着。**
+
+### 3. 受控工具调用
+
+`app/agents/tools.py` 是工具注册表，`app/agents/tool_loop.py` 是有步数上限的循环。
+
+安全边界不在提示词里，在**分发路径**里：
+
+```python
+if not spec.read_only:
+    raise ToolError('tool_not_permitted', f'{name} is not read-only')
+```
+
+即使将来有人注册了一个写工具，模型也无法通过「选择它」来调用——除非有人同时改这个函数
+和它的测试。当前 5 个工具全部只读且强制租户隔离，猜一个 id 只会得到 `not_found`。
+
+循环最多 4 步（`AGENT_MAX_TOOL_STEPS`），被拒绝的调用**记录但不重试**：
+重试一个权限错误就是把错误变成死循环。
+
+### 4. 超时、重试与成本计量
+
+`app/agents/resilience.py`：
+
+- 每次模型调用有超时（`LLM_TIMEOUT_SECONDS`），超时转成可重试失败；
+- 重试**只对瞬态故障**生效，`ValueError`（业务拒绝）不重试——重试它只是重复烧钱；
+- token 从两种 provider 形态里提取，成本按配置单价计算；**没上报就记 NULL，不记 0**。
+  记 0 会让「平均每次成本」这个指标永远好看，从而失去意义。
 
 ---
 
@@ -319,6 +423,17 @@ export OPENAI_CHAT_MODEL=...
 - 对**提示词注入**没有专门防御：当前设计把 LLM 输出限制在「生成措辞」，
   金额与状态不经过模型，但这不等于攻击面为零。
 - `InquiryPatch` 用 `None` 表示「未提供」，因此**无法通过 PATCH 清空某个字段**（需传空字符串）。
+- **默认 embedding 是哈希向量，不是语义模型。** 它能处理词形重叠，跨不过同义改写
+  （「滞箱费」↔「demurrage」）。检索质量数字是**词法检索**的数字，不要读成语义检索。
+- **重排是手写公式，不是 cross-encoder。** `retrieval.rank()` 用词覆盖 + 标题命中 +
+  词法强度，不是学习出来的 reranker。上真实 reranker 是下一步，不是已完成项。
+- **没有 MCP server。** 工具注册表是进程内的，协议层未实现。
+- **没有微调。** 仓库里没有 SFT/LoRA/QLoRA 的任何代码或数据；mock 解析器是规则，不是模型。
+- **图编排没有 checkpointer。** 刻意如此（见上文），代价是：一个进程内正在执行的图
+  无法在**节点中途**被暂停并原样续跑；续跑的单位是节点边界。这足够覆盖人工审批，
+  不足以覆盖「长事务内的任意中断」。
+- **成本字段依赖 provider 上报。** 未配置单价时 `cost_usd` 记 NULL；真实数字需要
+  接一个会上报 token 的 provider。
 
 完整的架构审查（含证据与修复优先级）见 [`docs/ARCHITECTURE_REVIEW.md`](docs/ARCHITECTURE_REVIEW.md)。
 
@@ -328,24 +443,28 @@ export OPENAI_CHAT_MODEL=...
 
 ```
 app/
-  main.py            43 条路由；鉴权、错误码映射、demo 页面挂载
+  main.py            51 条路由；鉴权、错误码映射、demo 页面挂载
   state_machine.py   InquiryStatus 迁移图 + advance_status()（唯一真相来源）
   enums.py           状态词汇表
-  models.py          20 张表（全部带 tenant_id）
+  models.py          23 张表（全部带 tenant_id）
   schemas.py         Pydantic 输入契约
-  config.py          45 个配置项（与 .env.example 逐项对齐，有测试守）
+  config.py          57 个配置项（与 .env.example 逐项对齐，有测试守）
   auth.py            dev 头 / JWT 双模式 + require_role()
   services/          确定性业务层：inquiry / schedule / rates / rfq / pricing /
                      approval / booking / tracking / vessel / followup /
                      prospecting / orchestrator
-  agents/            runtime（mock ↔ MAF 同接口）、specialists、prompts、maf_workflows
+  graph/             LangGraph 状态图：条件路由、可恢复闸门、游标持久化
+  knowledge/         SOP 切片 / 向量 / BM25 / 融合重排 / 带引用作答 + 拒答
+  agents/            runtime（mock ↔ MAF 同接口）、tools（只读注册表）、
+                     tool_loop（有界循环）、resilience（超时/重试/token）、
+                     specialists、prompts、maf_workflows
   providers/         rates / schedule / booking / tracking / email / prospecting / vessel
                      （Protocol + Mock 实现 + 真实厂商骨架）
 worker/scheduler.py  跟进任务轮询（支持 --once 用于 cron）
-evaluation/          行为评测：golden_dataset.jsonl + run_eval.py
-migrations/          Alembic；0001_initial 是显式冻结快照
+evaluation/          行为评测（run_eval.py）+ 检索评测（knowledge_eval.py）
+migrations/          Alembic；0001/0002 均为显式冻结快照
 demo_client/         静态演示页
-tests/               179 个测试
+tests/               238 个测试
 docs/                架构、分层、集成、交付、审查文档
 ```
 
