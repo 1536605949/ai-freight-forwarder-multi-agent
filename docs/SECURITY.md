@@ -7,6 +7,8 @@
 - Booking 只能基于已发送报价。
 - 价格由 rule engine 计算，不接受 Agent 自报金额。
 - Lead/Follow-up 尊重 opt-in / do-not-contact 与适用法律、平台条款。
+  冷外联的完整门禁（人工审批 / 合法依据 / 评分下限 / 频率上限）、来源可核验性，
+  以及每条规则的强制点与对应测试，见 [`OUTREACH_COMPLIANCE.md`](OUTREACH_COMPLIANCE.md)。
 - Secrets 仅环境变量/Secret Manager；禁止进入 Git。
 - AuditEvent 保存报价审批、发送、订舱、tracking 等关键动作。
 - 真实外部 API 使用最小权限 service account + rotation。

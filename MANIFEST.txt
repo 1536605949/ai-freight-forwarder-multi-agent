@@ -92,7 +92,9 @@
 ./docs/ARCHITECTURE_REVIEW.md
 ./docs/DATA_MODEL.md
 ./docs/DELIVERY_STEP1.md
+./docs/GITHUB_LANDSCAPE.md
 ./docs/INTEGRATIONS.md
+./docs/OUTREACH_COMPLIANCE.md
 ./docs/PRODUCTION_GAPS.md
 ./docs/REFERENCES.md
 ./docs/SECURITY.md

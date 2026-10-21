@@ -103,6 +103,11 @@ def api_prospect(prospect_id:str,db:Session=Depends(get_db),p:Principal=Depends(
     if not x: raise HTTPException(404,'not found')
     return _row(x)
 
+@app.get('/api/v1/prospects/{prospect_id}/evidence')
+def api_prospect_evidence(prospect_id:str,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):
+    try:return prospecting_svc.prospect_evidence(db,p.tenant_id,prospect_id)
+    except KeyError:raise HTTPException(404,'not found')
+
 @app.post('/api/v1/prospects/{prospect_id}/enrich')
 async def api_prospect_enrich(prospect_id:str,request:Request,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):
     try:return await prospecting_svc.enrich_prospect(db,p.tenant_id,p.user_id,request.state.trace_id,prospect_id)

@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     # Cold outreach always requires a recorded lawful basis; 'legitimate_interest_reviewed'
     # or 'opt_in'. Anything else is hard-blocked at the service layer.
     outreach_requires_human_approval: bool = True
+    # Quality floor for a cold send. This is an *operating policy*, not a model output: the
+    # agent proposes a fit_score, but a business decides how low it will go before writing to
+    # a stranger. Below the floor the message is still drafted (drafting harms nobody) and is
+    # refused at send time, next to the frequency cap -- both are anti-spam, not legality.
+    outreach_min_score: int = 70
     # Vessel position (AIS). Licensed data; mock provider is synthetic.
     vessel_provider: str = 'mock'
     ais_base_url: str | None = None

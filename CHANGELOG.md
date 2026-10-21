@@ -84,6 +84,27 @@ v2.0 的后端长出了四个能力面，界面上却只看得到一个 v1 的�
   冒烟在 node/jsdom 缺失时 **skip 并说明原因**，不伪造绿勾；单页检查数少于 12 项即判为
   「脚本可能坏了」而不是通过。
 
+### 新增：外联评分闸门与来源可核验性（`services/prospecting.py`）
+
+调研同类项目后补的两处，来源与取舍见 `docs/GITHUB_LANDSCAPE.md`，
+规则 → 强制点 → 测试的对照见 `docs/OUTREACH_COMPLIANCE.md`。
+
+- **第四道门禁：匹配度下限**（`OUTREACH_MIN_SCORE`，默认 70）。此前 `score` 只用于排序和
+  决定 Lead 初始状态，**没有任何门禁作用**，一封写给低分线索的信和写给高分线索的信
+  走的是同一条路。借鉴 `Codex-native-Lead-Hunter` 的 `fit_score >= 7`。
+  放在**发送**而非起草：起草不产生外部副作用，低分线索仍可出草稿；被拒后记录停在
+  `approved` 而不是 `sent`。顺序排在审批与合法依据之后——「你还没审批」是可行动的信息，
+  「分数不够」不是，先报前者。未知分数**失败即拒**（`outreach_score_unavailable`）。
+- **来源可核验性**：`GET /api/v1/prospects/{id}/evidence` 返回四级判断
+  `synthetic` / `placeholder` / `traceable` / `openable`。Mock 源写的是 `.example`
+  保留域，**永远解析不出来**，所以它被判成 `synthetic` 且不给出链接——
+  一个点开是 404 的「来源」会通过评审而不被检查，比明说「无法核验」更糟。
+  `_is_publicly_openable()` 按 RFC 2606 拦保留域，`test_a_reserved_domain_is_not_evidence`
+  直接对它做单元断言。可核验性**不是**门禁：大陆报关数据持牌而非公开，
+  把它做成门禁会让真实部署里所有合法线索都发不出去。
+- 两处都做了变异验证：把 `OUTREACH_MIN_SCORE` 调成 0，
+  `test_a_low_score_blocks_the_send_but_not_the_draft` 立刻以 `DID NOT RAISE` 变红。
+
 ### 修复
 
 - **图在闸门失败后仍继续执行**：`quote_send` 原本用普通边连到 `booking`，审批拒绝后图
@@ -121,9 +142,9 @@ v2.0 的后端长出了四个能力面，界面上却只看得到一个 v1 的�
 
 | 项目 | 1.0.0-rc3 | 2.0.0-rc1 |
 |---|---|---|
-| 测试 | 189 | **298** |
+| 测试 | 189 | **306** |
 | 覆盖率（整体） | 85% | **82%**（新增约 900 行 Agent 代码，新模块自身 88%） |
-| API 路由 | 43 | **54** |
+| API 路由 | 43 | **55** |
 | 数据表 / 索引 | 20 / 35 | **23 / 41** |
 | 检索评测 | 无 | **hit@3 95.5%，负例误答 0/12** |
 | 依赖 | 无编排框架 | **langgraph 1.2.x（硬依赖）** |

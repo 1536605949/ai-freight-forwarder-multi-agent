@@ -9,6 +9,7 @@ the thing standing between a business and a privacy violation.
 """
 from __future__ import annotations
 from datetime import datetime, timezone, timedelta
+from urllib.parse import urlparse
 from sqlalchemy.orm import Session
 from app.models import ProspectCandidate, OutreachActivity, Lead
 from app.providers.prospecting import get_prospecting_source
@@ -141,11 +142,15 @@ def approve_outreach(db:Session,tenant_id:str,reviewer:str,outreach_id:str,actio
 async def send_outreach(db:Session,tenant_id:str,actor:str,outreach_id:str)->tuple[OutreachActivity,object]:
     """Send an approved cold outreach message.
 
-    Three independent gates, all in code:
-      1. human approval recorded,
-      2. a lawful basis on file,
-      3. frequency cap for this recipient not exceeded.
-    Any one failing blocks the send — no prompt can bypass this.
+    Four independent gates, all in code, in this order:
+      1. human approval recorded,      -- may we act at all
+      2. a lawful basis on file,       -- are we allowed to contact this person
+      3. score at or above the floor,  -- is this lead worth a stranger's inbox
+      4. frequency cap for recipient,  -- have we already used up this month's attention
+
+    Any one failing blocks the send -- no prompt can bypass this. Gates 3 and 4 are
+    anti-spam policy, not legality; that is why they sit after 1 and 2, and why a low-score
+    draft is still allowed to exist. Drafting harms nobody. Sending does.
     """
     s=get_settings(); o=db.query(OutreachActivity).filter_by(id=outreach_id,tenant_id=tenant_id).first()
     if not o: raise KeyError('outreach_not_found')
@@ -157,14 +162,92 @@ async def send_outreach(db:Session,tenant_id:str,actor:str,outreach_id:str)->tup
     if basis not in OUTREACH_ALLOWED_BASIS:
         OUTREACH_BLOCKED.labels('no_lawful_basis').inc(); raise ValueError('compliance_basis_required')
 
+    # Fail closed on an unknown score: "we cannot prove this lead is worth contacting" and
+    # "this lead scored low" are both reasons not to send, and only one of them is fixable
+    # by re-running the search.
+    if p is None or p.score is None:
+        OUTREACH_BLOCKED.labels('score_unavailable').inc(); raise ValueError('outreach_score_unavailable')
+    if p.score < s.outreach_min_score:
+        OUTREACH_BLOCKED.labels('score_below_threshold').inc(); raise ValueError('score_below_outreach_threshold')
+
     if _frequency_block(db,tenant_id,o.recipient)>=s.outreach_max_per_window:
         OUTREACH_BLOCKED.labels('frequency_cap').inc(); raise ValueError('frequency_cap_exceeded')
 
     result=await get_email_provider().send(o.recipient,o.subject or '合作洽谈',o.body)
     o.status='sent'; o.sent_at=datetime.now(timezone.utc); o.provider_message_id=getattr(result,'message_id',None)
     if p: p.status='contacted'
-    audit(db,tenant_id,actor,'outreach.sent','outreach',o.id,{'recipient':o.recipient,'basis':basis})
+    audit(db,tenant_id,actor,'outreach.sent','outreach',o.id,{'recipient':o.recipient,'basis':basis,'score':p.score})
     db.commit(); db.refresh(o); return o,result
+
+
+def _is_publicly_openable(url:str|None)->bool:
+    """True only if a reviewer could actually open this URL today.
+
+    RFC 2606 reserves `.example`, `.test`, `.invalid` and `.localhost`; a host ending in one
+    of them can never resolve, no matter how much it looks like a link. The mock source
+    deliberately uses `.example`, so this check is what keeps "there is a website field"
+    from being mistaken for "there is something to check".
+    """
+    if not url: return False
+    host=urlparse(url).netloc.lower().split(':')[0]
+    if not host: return False
+    return host!='localhost' and not host.endswith(('.example','.test','.invalid','.localhost'))
+
+
+_EVIDENCE_NOTES={
+    'synthetic':'演示用合成数据。任何来源链接都无法核验，演示时不得当作真实线索。',
+    'placeholder':'网址存在但域名是保留域（.example/.test 等），永远解析不出来——不是证据。',
+    'traceable':'有供应商记录可回溯，但没有公开链接；核验需向数据供应商调档。',
+    'openable':'存在可公开打开的链接，人工打开即可确认主体。',
+}
+
+
+def prospect_evidence(db:Session,tenant_id:str,prospect_id:str)->dict:
+    """What backs this prospect, and whether a human can actually check it.
+
+    The distinction this function exists to make: a *reference* is not *evidence*.
+    `source_ref` says which row of which source produced this candidate; whether anyone
+    outside the system can open it depends entirely on the origin.
+
+    Four levels, because a boolean would flatten the difference that matters:
+      - `synthetic`    -- demo data. Nobody can verify it, and we say so. A fabricated URL
+                          that 404s would be worse than an honest "unverifiable".
+      - `placeholder`  -- a URL on a reserved domain. It looks openable and never resolves.
+      - `traceable`    -- a licensed vendor record id. The vendor can produce the document;
+                          there is no public link.
+      - `openable`     -- a public URL a reviewer can open right now.
+
+    This is a read-only projection, not a gate. Outreach is gated on approval, lawful basis,
+    score and frequency -- not on verifiability, because in mainland China the underlying
+    customs data is licensed rather than public (see `providers/prospecting.py`).
+    """
+    p=db.query(ProspectCandidate).filter_by(id=prospect_id,tenant_id=tenant_id).first()
+    if not p: raise KeyError('prospect_not_found')
+
+    synthetic=(p.data_origin or '').startswith('mock') or (p.source or '')=='mock'
+    openable=_is_publicly_openable(p.website)
+
+    sources=[]
+    if p.source or p.source_ref:
+        sources.append({'kind':'record_ref','source':p.source,'ref':p.source_ref,'url':None,
+            'note':'数据源行号，用于回溯到供应商记录，本身不是可打开的链接'})
+    if p.website:
+        sources.append({'kind':'company_site','source':'website','ref':p.website,
+            'url':p.website if openable else None,
+            'note':'企业官网，需人工打开确认主体真实存在' if openable
+                   else '域名无法解析（保留域），不能作为核验依据'})
+
+    if synthetic: verifiability='synthetic'
+    elif openable: verifiability='openable'
+    elif p.website: verifiability='placeholder'
+    else: verifiability='traceable'
+
+    return {'prospect_id':p.id,'company':p.company,'data_origin':p.data_origin,
+        'verifiability':verifiability,'human_can_check':verifiability=='openable',
+        'sources':sources,'score':p.score,'score_rationale':p.score_rationale,
+        'note':_EVIDENCE_NOTES[verifiability]}
+
+
 
 
 def mark_opt_out(db:Session,tenant_id:str,actor:str,email:str,reason:str|None=None)->dict:

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -95,3 +96,31 @@ def test_page_javascript_actually_runs():
             f'only {len(entry["checks"])} checks ran for {entry["page"]}; '
             'the smoke script may be broken'
         )
+
+
+# --- Parse check for pages nobody drives -----------------------------------------------
+# `page_smoke.js` drives graph and knowledge. The other three pages have contract tests but
+# nothing that would notice a syntax error in their inline script -- and this module's own
+# history says a page that never executes is a page that is never verified. `node --check`
+# is the cheapest honest middle ground: it proves the script parses for every page, without
+# pretending to prove it renders.
+
+def _inline_script(html: str) -> str:
+    return '\n'.join(re.findall(r'<script>(.*?)</script>', html, re.S))
+
+
+_DEMO_PAGES = sorted(p.name for p in (ROOT / 'demo_client').glob('*.html'))
+
+
+@pytest.mark.skipif(_NODE is None, reason='node not installed; page parse check is optional')
+@pytest.mark.parametrize('page', _DEMO_PAGES)
+def test_every_demo_page_inline_script_parses(page, tmp_path):
+    code = _inline_script((ROOT / 'demo_client' / page).read_text(encoding='utf-8'))
+    if not code.strip():
+        pytest.skip(f'{page} has no inline script')
+
+    exe, _ = _NODE.split('\x00')
+    target = tmp_path / 'page.js'
+    target.write_text(code, encoding='utf-8')
+    proc = subprocess.run([exe, '--check', str(target)], capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, f'{page}: inline script does not parse\n{proc.stderr[-1200:]}'

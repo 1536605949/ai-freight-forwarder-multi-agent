@@ -24,7 +24,7 @@ python scripts/bootstrap_dev.py          # 建 venv + 装依赖 + alembic upgrad
 python -m uvicorn app.main:app --port 8100
 
 # 另开一个终端：
-pytest -q                                # 单元 + 集成：298 passed
+pytest -q                                # 单元 + 集成：306 passed
 python evaluation/run_eval.py            # 行为评测：6/6 通过
 python evaluation/knowledge_eval.py      # 检索评测：hit@3 95.5%，负例误答 0/12
 python scripts/delivery_check.py         # 交付验收：44/44 通过
@@ -50,13 +50,13 @@ curl -s localhost:8100/api/v1/graph/run -H 'content-type: application/json' \
 
 | 项目 | 结果 | 复现命令 |
 |---|---|---|
-| 单元 / 集成测试 | **298 passed** | `pytest -q` |
+| 单元 / 集成测试 | **306 passed** | `pytest -q` |
 | 覆盖率 | **82%** 整体；v2.0 新增模块 **88%** | `pytest --cov=app --cov=worker --cov=evaluation` |
 | 静态检查 | **ruff 全绿**（规则集见 `pyproject.toml`） | `ruff check app tests worker evaluation scripts` |
 | 行为评测 | **6/6**，全部真实执行 | `python evaluation/run_eval.py` |
 | SOP 检索评测 | **hit@1 90.9% / hit@3 95.5% / 负例误答 0** | `python evaluation/knowledge_eval.py` |
 | 交付验收 | **44/44** | `python scripts/delivery_check.py` |
-| API 路由 | **54** | `GET /docs` |
+| API 路由 | **55** | `GET /docs` |
 | 度量口径 | `GET /api/v1/metrics/agent`（p50/p95、token、成本、闸门分布） | 见下方「可观测性」 |
 | 数据表 / 索引 | **23 / 41** | `alembic upgrade head` |
 | 模块循环依赖 | **0** | `tests/test_architecture_asset.py` |
@@ -384,17 +384,31 @@ ProspectingSource (可插拔)
    → Prospecting Agent  (按航线评估匹配度)
    → Enrichment Agent   (客户画像 + 决策人角色)
    → Cold Outreach Agent(生成开发信)
-   → 人工审批 + 三道合规门禁
+   → 人工审批 + 四道代码级门禁
    → Lead → 进入询价报价流程
 ```
 
-**三道代码级门禁**（`app/services/prospecting.py`，提示词无法绕过）：
+**四道代码级门禁**（`app/services/prospecting.py`，提示词无法绕过）：
 
-1. 必须已记录人工批准
-2. 必须有合法处理依据（`opt_in` / `legitimate_interest_reviewed`）
-3. 未超过触达频率上限（默认 30 天内 2 次）
+| # | 门禁 | 失败码 |
+|---|---|---|
+| 1 | 必须已记录人工批准 | `approval_required` |
+| 2 | 必须有合法处理依据（`opt_in` / `legitimate_interest_reviewed`） | `compliance_basis_required` |
+| 3 | 匹配度不低于下限（`OUTREACH_MIN_SCORE`，默认 70） | `score_below_outreach_threshold` |
+| 4 | 未超过触达频率上限（默认 30 天内 2 次） | `frequency_cap_exceeded` |
+
+顺序有讲究：1、2 是授权与合法性，3、4 是反滥发的运营策略。低分线索**仍然可以生成草稿**
+——起草不产生外部副作用，发送才会——但发送会被拒，且被拒后记录仍停在 `approved`。
 
 另支持 `POST /api/v1/outreach/opt-out` 一键退订，立即在候选池、Lead、未发出草稿三处生效。
+
+**数据能不能核验，如实说**：`GET /api/v1/prospects/{id}/evidence` 返回四级判断
+（`synthetic` / `placeholder` / `traceable` / `openable`）。Mock 源写的是 `.example` 保留域，
+**永远不会解析**，所以它被标成 `synthetic` 且不给出链接——伪造一个点开是 404 的「来源」
+比诚实地说「无法核验」更糟。
+
+规则 → 强制点 → 测试的完整对照见 [`docs/OUTREACH_COMPLIANCE.md`](docs/OUTREACH_COMPLIANCE.md)，
+同类项目调研见 [`docs/GITHUB_LANDSCAPE.md`](docs/GITHUB_LANDSCAPE.md)。
 
 > **数据来源合规**：中国大陆海关提单数据不对普通企业开放，仅可通过持牌数据商获取；
 > AIS 船位为付费授权数据。仓库内 `MockProspectingSource` 与 mock AIS 均为**合成数据**，
@@ -488,12 +502,12 @@ export OPENAI_CHAT_MODEL=...
 
 ```
 app/
-  main.py            54 条路由；鉴权、错误码映射、demo 页面挂载
+  main.py            55 条路由；鉴权、错误码映射、demo 页面挂载
   state_machine.py   InquiryStatus 迁移图 + advance_status()（唯一真相来源）
   enums.py           状态词汇表
   models.py          23 张表（全部带 tenant_id）
   schemas.py         Pydantic 输入契约
-  config.py          57 个配置项（与 .env.example 逐项对齐，有测试守）
+  config.py          58 个配置项（与 .env.example 逐项对齐，有测试守）
   auth.py            dev 头 / JWT 双模式 + require_role()
   services/          确定性业务层：inquiry / schedule / rates / rfq / pricing /
                      approval / booking / tracking / vessel / followup /
@@ -509,7 +523,7 @@ worker/scheduler.py  跟进任务轮询（支持 --once 用于 cron）
 evaluation/          行为评测（run_eval.py）+ 检索评测（knowledge_eval.py）
 migrations/          Alembic；0001/0002 均为显式冻结快照
 demo_client/         静态演示页
-tests/               298 个测试
+tests/               306 个测试
 docs/                架构、分层、集成、交付、审查文档
 ```
 
@@ -604,6 +618,8 @@ revision），并用 AST 扫过 `app/`、`worker/`、`scripts/` 全部文件，�
 | [`docs/ARCHITECTURE_REVIEW.md`](docs/ARCHITECTURE_REVIEW.md) | 架构审查：模块职责、依赖、数据流、薄弱环节与修复优先级 |
 | [`docs/AGENT_DESIGN.md`](docs/AGENT_DESIGN.md) | Agent 边界与提示词策略 |
 | [`docs/UI_DESIGN.md`](docs/UI_DESIGN.md) | 演示界面：现状评估、优化方案、每个页面的功能区与交互流程 |
+| [`docs/OUTREACH_COMPLIANCE.md`](docs/OUTREACH_COMPLIANCE.md) | 获客外联：规则 → 强制点 → 测试三列对照 |
+| [`docs/GITHUB_LANDSCAPE.md`](docs/GITHUB_LANDSCAPE.md) | 同类项目调研：检索记录、可借鉴清单、方法局限 |
 | [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md) | 外部系统接入（含运价数据的硬约束） |
 | [`docs/DELIVERY_STEP1.md`](docs/DELIVERY_STEP1.md) | 第一步交付状态与验收口径 |
 | [`docs/PRODUCTION_GAPS.md`](docs/PRODUCTION_GAPS.md) | 距离生产还差什么 |
