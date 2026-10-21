@@ -117,3 +117,28 @@ def test_the_app_startup_hook_no_longer_creates_tables():
         'app/main.py must not create or drop tables: the schema belongs to alembic '
         f'(found {offenders}). Use app.schema_guard.ensure_schema instead.'
     )
+
+
+def test_no_runtime_module_creates_or_drops_tables():
+    """`app/`, `worker/` and `scripts/` must never create or drop tables.
+
+    The startup hook and the worker each called `create_all`; both are gone now. This sweeps
+    the whole runtime surface so the next module cannot reintroduce it, and it is an AST walk
+    rather than a text search so a mention in a docstring or a comment does not count.
+
+    `tests/` and `evaluation/` are deliberately excluded: they build throwaway in-memory
+    databases that are never migrated, which is a different thing from shipping a schema.
+    """
+    offenders: list[str] = []
+    for folder in ('app', 'worker', 'scripts'):
+        for path in sorted((ROOT / folder).rglob('*.py')):
+            tree = ast.parse(path.read_text(encoding='utf-8'))
+            for node in ast.walk(tree):
+                if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                        and node.func.attr in {'create_all', 'drop_all'}):
+                    offenders.append(f'{path.relative_to(ROOT)}:{node.lineno}')
+
+    assert offenders == [], (
+        'the schema belongs to alembic; these call create_all/drop_all: '
+        f'{offenders}. Use app.schema_guard.ensure_schema.'
+    )

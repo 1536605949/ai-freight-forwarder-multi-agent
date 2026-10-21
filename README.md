@@ -24,7 +24,7 @@ python scripts/bootstrap_dev.py          # 建 venv + 装依赖 + alembic upgrad
 python -m uvicorn app.main:app --port 8100
 
 # 另开一个终端：
-pytest -q                                # 单元 + 集成：266 passed
+pytest -q                                # 单元 + 集成：267 passed
 python evaluation/run_eval.py            # 行为评测：6/6 通过
 python evaluation/knowledge_eval.py      # 检索评测：hit@3 95.5%，负例误答 0/12
 python scripts/delivery_check.py         # 交付验收：44/44 通过
@@ -50,7 +50,7 @@ curl -s localhost:8100/api/v1/graph/run -H 'content-type: application/json' \
 
 | 项目 | 结果 | 复现命令 |
 |---|---|---|
-| 单元 / 集成测试 | **266 passed** | `pytest -q` |
+| 单元 / 集成测试 | **267 passed** | `pytest -q` |
 | 覆盖率 | **82%** 整体；v2.0 新增模块 **88%** | `pytest --cov=app --cov=worker --cov=evaluation` |
 | 静态检查 | **ruff 全绿**（规则集见 `pyproject.toml`） | `ruff check app tests worker evaluation scripts` |
 | 行为评测 | **6/6**，全部真实执行 | `python evaluation/run_eval.py` |
@@ -494,7 +494,7 @@ worker/scheduler.py  跟进任务轮询（支持 --once 用于 cron）
 evaluation/          行为评测（run_eval.py）+ 检索评测（knowledge_eval.py）
 migrations/          Alembic；0001/0002 均为显式冻结快照
 demo_client/         静态演示页
-tests/               266 个测试
+tests/               267 个测试
 docs/                架构、分层、集成、交付、审查文档
 ```
 
@@ -569,8 +569,13 @@ def startup():
 ```
 
 刻意**不**在启动时自动升级：进程启动时改 schema，在滚动发布里两个实例会抢同一批 DDL。
-`tests/test_schema_guard.py` 用 AST 断言 `main.py` 里不再出现 `create_all`/`drop_all`，
-并覆盖三种拒绝情形（无 schema / create_all 建的库 / 落后一个 revision）。
+同一条规则也适用于另外两个入口：`worker/scheduler.py` 和 `scripts/seed_demo.py`
+原本也各自 `create_all`（先起 worker 再迁移，同样会造出 alembic 接管不了的库），
+现在都改成 `ensure_schema`。
+
+`tests/test_schema_guard.py` 覆盖三种拒绝情形（无 schema / create_all 建的库 / 落后一个
+revision），并用 AST 扫过 `app/`、`worker/`、`scripts/` 全部文件，断言不再出现
+`create_all`/`drop_all`——扫描整片运行时代码，而不是只盯 `main.py`。
 
 **启动即拒绝**比「起来了但 schema 是旧的」更好：前者是一条命令的修复，后者是几小时的排查。
 

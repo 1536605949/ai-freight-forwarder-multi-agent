@@ -49,6 +49,13 @@ class SchemaNotReady(RuntimeError):
 
 def head_revision() -> str | None:
     """The head revision of the migration scripts on disk."""
+    import logging
+
+    # Must run *before* the alembic import: alembic registers its plugins at module import
+    # time, and each registration logs "setup plugin ..." at INFO. Those lines are useful
+    # when running a migration and are noise on every service start.
+    logging.getLogger('alembic.runtime.plugins').setLevel(logging.WARNING)
+
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 

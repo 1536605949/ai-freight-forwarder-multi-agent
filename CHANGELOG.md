@@ -83,8 +83,10 @@ README 里的路由数、表/索引数、只读工具数，CHANGELOG 里的节�
   加列，所以任何新增列的迁移都会让旧库静默缺列（症状是 `no such column: agent_runs.prompt_tokens`），
   并且它建出的库没有 `alembic_version` 行，使 `alembic upgrade head` 死在
   `table agent_runs already exists`——用来修的手段被造成问题的东西挡住。
-  现在启动只做检查（`app/schema_guard.py`），不在 head 就拒绝启动并给出修复命令；
-  `tests/test_schema_guard.py` 用 AST 断言 `main.py` 不再出现 `create_all`。
+  现在启动只做检查（`app/schema_guard.py`），不在 head 就拒绝启动并给出修复命令。
+  `worker/scheduler.py` 与 `scripts/seed_demo.py` 同样在 `create_all`，一并改为守卫；
+  `tests/test_schema_guard.py` 用 AST 扫过 `app/`、`worker/`、`scripts/` 全部文件，
+  断言 `create_all`/`drop_all` 不再出现（已用变异测试验证会红）。
 - **节点失败后图继续往下跑**：`understand` 失败后，`schedules`/`rates`/`rfq`/`supplier_quotes`
   依次继续执行并各自失败，最后上报的原因是**最后一个**失败（`supplier_quotes:rfq_missing`），
   于是一个「询价单不存在」被诊断成「RFQ 缺失」。中段四条普通边改为条件边，
@@ -94,7 +96,7 @@ README 里的路由数、表/索引数、只读工具数，CHANGELOG 里的节�
 
 | 项目 | 1.0.0-rc3 | 2.0.0-rc1 |
 |---|---|---|
-| 测试 | 189 | **266** |
+| 测试 | 189 | **267** |
 | 覆盖率（整体） | 85% | **82%**（新增约 900 行 Agent 代码，新模块自身 88%） |
 | API 路由 | 43 | **52** |
 | 数据表 / 索引 | 20 / 35 | **23 / 41** |

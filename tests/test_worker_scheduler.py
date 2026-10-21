@@ -51,7 +51,7 @@ async def test_run_once_does_not_swallow_errors(db, monkeypatch):
 def loop_harness(db, monkeypatch):
     """Run `main()` against the test session, with the sleep removed."""
     monkeypatch.setattr(scheduler, 'SessionLocal', lambda: db)
-    monkeypatch.setattr(scheduler.Base.metadata, 'create_all', lambda *a, **k: None)
+    monkeypatch.setattr(scheduler, 'ensure_schema', lambda *a, **k: 'test')
 
     sleeps: list[float] = []
 

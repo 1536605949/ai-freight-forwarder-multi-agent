@@ -15,7 +15,8 @@ import argparse
 import asyncio
 
 from app.config import get_settings
-from app.db import Base, SessionLocal, engine
+from app.db import SessionLocal, engine
+from app.schema_guard import ensure_schema
 from app.logging_utils import configure_logging, log_event
 from app.services.followup import process_due
 
@@ -31,7 +32,10 @@ async def run_once(db) -> list:
 async def main(iterations: int | None = None) -> None:
     """Poll until stopped, or for `iterations` polls when given."""
     configure_logging()
-    Base.metadata.create_all(engine)
+    # The worker refuses to start on a schema alembic does not own. It used to call
+    # create_all, which meant starting the worker before the migration produced a database
+    # that `alembic upgrade head` could not adopt.
+    ensure_schema(engine)
     settings = get_settings()
     log_event('worker.started', poll_seconds=settings.worker_poll_seconds,
               iterations=iterations or 'forever')
