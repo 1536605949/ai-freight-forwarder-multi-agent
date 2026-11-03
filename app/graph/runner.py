@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.graph.builder import NODES, build_pipeline_graph
+from app.graph.checkpoint import SqlCheckpointSaver, read_history
 from app.models import PipelineGraphRun
 from app.services.common import audit, uid
 
@@ -100,6 +101,7 @@ async def run_graph(
     start_node: str = 'understand',
     vessel_name: str | None = None,
     allow_synthetic_quotes: bool | None = None,
+    roles: tuple[str, ...] = (),
 ) -> GraphRun:
     if start_node not in NODES:
         raise ValueError(f'unknown_node: {start_node}')
@@ -109,7 +111,15 @@ async def run_graph(
     s = get_settings()
     allow_synthetic = _effective_demo_shortcuts(allow_synthetic_quotes)
 
-    graph = build_pipeline_graph(db=db, tenant_id=tenant_id, actor=actor, trace_id=trace_id)
+    # The thread id has to exist *before* the graph runs, because the checkpointer writes
+    # against it from the first node. Creating it afterwards (as the cursor-only version did)
+    # would leave the snapshots on a thread nothing points at.
+    run_id = uid('grun_')
+    thread_id = uid('thr_')
+    saver = SqlCheckpointSaver(db, tenant_id=tenant_id, run_id=run_id)
+
+    graph = build_pipeline_graph(db=db, tenant_id=tenant_id, actor=actor, trace_id=trace_id,
+                                 roles=tuple(roles), checkpointer=saver)
     initial: dict[str, Any] = {
         'inquiry_id': inquiry_id,
         'tenant_id': tenant_id,
@@ -123,14 +133,12 @@ async def run_graph(
         'steps': [],
     }
 
-    final = await graph.ainvoke(initial)
+    final = await graph.ainvoke(initial, {'configurable': {'thread_id': thread_id}})
     steps = list(final.get('steps') or [])
     status = final.get('status') or 'completed'
     if status == 'running':
         status = 'completed'
 
-    run_id = uid('grun_')
-    thread_id = uid('thr_')
     record = PipelineGraphRun(
         id=run_id, tenant_id=tenant_id, inquiry_id=inquiry_id, thread_id=thread_id,
         status=status, current_node=steps[-1]['node'] if steps else start_node,
@@ -161,6 +169,7 @@ async def resume_graph(
     inquiry_id: str,
     *,
     vessel_name: str | None = None,
+    roles: tuple[str, ...] = (),
 ) -> GraphRun:
     """Re-enter a halted run at the node it stopped at.
 
@@ -174,7 +183,7 @@ async def resume_graph(
     if node is None:
         raise ValueError(f'run_is_not_resumable: {last.status}')
     return await run_graph(db, tenant_id, actor, trace_id, inquiry_id,
-                           start_node=node, vessel_name=vessel_name)
+                           start_node=node, vessel_name=vessel_name, roles=roles)
 
 
 def latest_run(db: Session, tenant_id: str, inquiry_id: str) -> PipelineGraphRun | None:
@@ -182,3 +191,17 @@ def latest_run(db: Session, tenant_id: str, inquiry_id: str) -> PipelineGraphRun
             .filter_by(tenant_id=tenant_id, inquiry_id=inquiry_id)
             .order_by(PipelineGraphRun.created_at.desc(), PipelineGraphRun.id.desc())
             .first())
+
+
+def run_checkpoints(db: Session, tenant_id: str, run_id: str, *,
+                    limit: int = 200) -> list[dict]:
+    """The per-node state timeline for one run, oldest first.
+
+    Scoped by tenant through the run row, not by thread id: a thread id is an internal
+    identifier and must not become a capability. Guessing one must not read another tenant's
+    checkpoints.
+    """
+    run = db.query(PipelineGraphRun).filter_by(id=run_id, tenant_id=tenant_id).first()
+    if run is None:
+        raise KeyError('run_not_found')
+    return read_history(db, run.thread_id, limit=limit)

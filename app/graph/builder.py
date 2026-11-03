@@ -25,18 +25,31 @@ State ownership
 ---------------
 Business state stays in the domain tables (inquiry status, quote status, booking). The graph
 state is a *cursor plus a trace*: it is recomputed from the database on every invocation and
-never becomes a second source of truth. That is why there is no in-memory checkpointer --
-an in-memory checkpoint cannot survive the deploy that happens while a quote waits for
-approval. `PipelineGraphRun` persists the cursor instead.
+never becomes a second source of truth. There is no *in-memory* checkpointer -- one cannot
+survive the deploy that happens while a quote waits for approval. `PipelineGraphRun` persists
+the cursor, and `app/graph/checkpoint.py` persists real LangGraph checkpoints to SQL for
+replay. Neither replaces the domain tables.
+
+Who does what
+-------------
+Every step records the agent that owns the node (`app/agents/registry.py`), so a trace answers
+"who acted" and not only "which function ran". Every side effect goes through
+`app/harness/guard.py`, which refuses before the service is reached. The graph may be wrong
+about sequencing and still cannot send an unapproved quote, because the refusal does not live
+in the graph.
 """
 from __future__ import annotations
 
 import operator
-import time
 from typing import Annotated, TypedDict
 
 from langgraph.graph import END, StateGraph
 
+import app.harness as harness
+from app.agents.registry import agent_for_node
+from app.graph.nodes import guarded as _guarded
+from app.graph.nodes import timed as _timed
+from app.graph.nodes import trace_step as _step
 from app.models import CustomerQuote, Inquiry, RFQ, SupplierQuote
 from app.services import approval as approval_svc
 from app.services import booking as booking_svc
@@ -85,88 +98,21 @@ class PipelineState(TypedDict, total=False):
     steps: Annotated[list[dict], operator.add]
 
 
-def _step(node: str, status: str = 'ok', detail: str = '', elapsed_ms: int | None = None,
-          **outputs) -> dict:
-    step = {'node': node, 'status': status, 'detail': detail, 'outputs': outputs}
-    if elapsed_ms is not None:
-        step['elapsed_ms'] = elapsed_ms
-    return step
-
-
-def _ms(started: float) -> int:
-    """Whole milliseconds since `started`, floored at 0.
-
-    Rounded rather than truncated so a fast node does not read as 0 ms purely from
-    float noise; the point of the field is to be honest about a slow node, not to
-    flatter a fast one.
-    """
-    return max(0, round((time.perf_counter() - started) * 1000))
-
-
 def _halted(state: PipelineState) -> bool:
     return state.get('status') in HALT_STATUSES
 
 
-def _guarded(node: str, handler):
-    """Run a node, converting a business refusal into a terminal state.
-
-    A `ValueError` from a service is a *result* ("insufficient_supplier_quotes"), not a
-    crash. Letting it propagate would abort the graph with a stack trace and lose the trace
-    that explains which node refused.
-
-    Every step produced here carries `elapsed_ms`. Timing lives in the wrapper rather than
-    in each node so that adding a node cannot forget it, and so the failure paths are
-    measured too -- a node that fails after 30 seconds is the one worth seeing.
-    """
-    import inspect
-
-    async def wrapped(state: PipelineState) -> dict:
-        started = time.perf_counter()
-        try:
-            result = handler(state)
-            if inspect.isawaitable(result):
-                result = await result
-        except KeyError as exc:
-            return {'status': 'failed', 'stop_reason': f'{node}:not_found:{exc}',
-                    'steps': [_step(node, 'failed', f'not_found: {exc}',
-                                    elapsed_ms=_ms(started))]}
-        except ValueError as exc:
-            return {'status': 'failed', 'stop_reason': f'{node}:{exc}',
-                    'steps': [_step(node, 'failed', str(exc), elapsed_ms=_ms(started))]}
-
-        elapsed = _ms(started)
-        for step in result.get('steps') or []:
-            step.setdefault('elapsed_ms', elapsed)
-        return result
-
-    return wrapped
-
-
-def _timed(node: str, handler):
-    """Measure a node that has no business refusal to catch.
-
-    `clarify` only reshapes state, so it has nothing to guard -- but leaving it unmeasured
-    would make it the one node that runs without a timing sample, and a metrics table that
-    silently omits a node is worse than one that reports 0 ms for it.
-    """
-
-    async def wrapped(state: PipelineState) -> dict:
-        started = time.perf_counter()
-        result = handler(state)
-        elapsed = _ms(started)
-        for step in result.get('steps') or []:
-            step.setdefault('elapsed_ms', elapsed)
-        return result
-
-    return wrapped
-
-
-def build_pipeline_graph(*, db, tenant_id: str, actor: str, trace_id: str):
+def build_pipeline_graph(*, db, tenant_id: str, actor: str, trace_id: str,
+                         roles: tuple[str, ...] = (), checkpointer=None):
     """Build a graph bound to one request's session.
 
     The session is captured in the closures rather than put in the state: graph state is
     serialised and logged, and a SQLAlchemy Session is neither serialisable nor safe to
     share that way.
+
+    `roles` is the caller's role set, passed to the harness. It is empty by default so that
+    an internal caller (a test, a script) is not silently granted a reviewer role; the HTTP
+    layer always passes the principal's real roles.
     """
 
     def _load(state: PipelineState) -> Inquiry:
@@ -196,6 +142,19 @@ def build_pipeline_graph(*, db, tenant_id: str, actor: str, trace_id: str):
                .filter_by(tenant_id=tenant_id, inquiry_id=state['inquiry_id'])
                .order_by(CustomerQuote.created_at.desc()).first())
         return row.id if row else None
+
+    def _quote(state: PipelineState) -> CustomerQuote | None:
+        """The quote row, not just its id.
+
+        The harness needs the *status* to decide whether a send is allowed, and reading it
+        from the row the service will act on is what keeps the decision and the action on the
+        same object. Passing a status through graph state would let a stale value outlive the
+        approval it described.
+        """
+        quote_id = _quote_id(state)
+        if not quote_id:
+            return None
+        return db.query(CustomerQuote).filter_by(id=quote_id, tenant_id=tenant_id).first()
 
     def understand(state: PipelineState) -> dict:
         inquiry = _load(state)
@@ -247,10 +206,13 @@ def build_pipeline_graph(*, db, tenant_id: str, actor: str, trace_id: str):
         if existing:
             return {'rfq_id': existing.id,
                     'steps': [_step('rfq', detail='reusing open rfq', rfq_id=existing.id)]}
-        row, results = await rfq_svc.create_rfq(db, tenant_id, actor, trace_id, inquiry.id)
+        row, results = await harness.run(
+            'supplier.rfq.send', agent=agent_for_node('rfq'), db=db, tenant_id=tenant_id,
+            actor=actor, roles=roles, detail={'inquiry_id': inquiry.id},
+            call=lambda: rfq_svc.create_rfq(db, tenant_id, actor, trace_id, inquiry.id))
         return {'rfq_id': row.id,
                 'steps': [_step('rfq', detail=f'sent to {len(results)} suppliers',
-                                rfq_id=row.id)]}
+                                action='supplier.rfq.send', rfq_id=row.id)]}
 
     def supplier_quotes(state: PipelineState) -> dict:
         rfq_id = _rfq_id(state)
@@ -259,6 +221,14 @@ def build_pipeline_graph(*, db, tenant_id: str, actor: str, trace_id: str):
         have = db.query(SupplierQuote).filter_by(tenant_id=tenant_id, rfq_id=rfq_id).count()
         seeded = 0
         if state.get('allow_synthetic_quotes') and have < state.get('min_supplier_quotes', 2):
+            # Recording a supplier quote is a DRAFT write, so the harness allows it -- but it
+            # is still declared, still audited, and still owned by the sourcing agent. The
+            # point of routing a harmless write through the gate is that the policy table
+            # stays the complete surface; an exception here would be the crack a later
+            # exception widens.
+            harness.check('supplier.quote.record', agent=agent_for_node('supplier_quotes'),
+                          db=db, tenant_id=tenant_id, actor=actor, roles=roles,
+                          detail={'rfq_id': rfq_id, 'synthetic': True})
             from app.schemas import SupplierQuoteIn
 
             for name, addr, ocean, sur, transit, free, rel in _DEMO_QUOTES[have:]:
@@ -282,9 +252,17 @@ def build_pipeline_graph(*, db, tenant_id: str, actor: str, trace_id: str):
         rfq_id = _rfq_id(state)
         if not rfq_id:
             raise ValueError('rfq_missing')
-        quote = await pricing_svc.optimize_quote(db, tenant_id, actor, trace_id, rfq_id)
+        # `quote.price` is DRAFT: the number is computed by the deterministic Pricing Engine.
+        # The action is declared anyway, because "the agent may not alter the price" is
+        # enforced by the engine, while "the agent may not price without being the quoting
+        # agent" is enforced here.
+        quote = await harness.run(
+            'quote.price', agent=agent_for_node('optimize'), db=db, tenant_id=tenant_id,
+            actor=actor, roles=roles, detail={'rfq_id': rfq_id},
+            call=lambda: pricing_svc.optimize_quote(db, tenant_id, actor, trace_id, rfq_id))
         return {'rfq_id': rfq_id, 'quote_id': quote.id, 'sell_amount': quote.sell_amount,
                 'steps': [_step('optimize', detail=f'sell {quote.sell_amount}',
+                                action='quote.price',
                                 quote_id=quote.id, cost=quote.cost_amount,
                                 margin=quote.margin_amount)]}
 
@@ -310,25 +288,40 @@ def build_pipeline_graph(*, db, tenant_id: str, actor: str, trace_id: str):
         }
 
     async def quote_send(state: PipelineState) -> dict:
-        quote_id = _quote_id(state)
-        if not quote_id:
+        quote = _quote(state)
+        if not quote:
             raise ValueError('quote_missing')
-        # The deterministic gate. Raises unless the quote is approved.
-        await approval_svc.send_quote(db, tenant_id, actor, quote_id)
-        return {'quote_id': quote_id,
-                'steps': [_step('quote_send', detail='quote sent', quote_id=quote_id)]}
+        # Two gates, deliberately not one. The harness refuses here, before the service is
+        # called; `approval.send_quote` refuses again inside the service. Removing either
+        # leaves the other working, which is why neither is "the" gate.
+        await harness.run(
+            'quote.send', agent=agent_for_node('quote_send'), db=db, tenant_id=tenant_id,
+            actor=actor, roles=roles, approved=(quote.status == 'approved'),
+            detail={'quote_id': quote.id},
+            call=lambda: approval_svc.send_quote(db, tenant_id, actor, quote.id))
+        return {'quote_id': quote.id,
+                'steps': [_step('quote_send', detail='quote sent', action='quote.send',
+                                quote_id=quote.id)]}
 
     async def booking(state: PipelineState) -> dict:
-        quote_id = _quote_id(state)
-        if not quote_id:
+        quote = _quote(state)
+        if not quote:
             raise ValueError('quote_missing')
         inquiry = _load(state)
         cargo = {'equipment': inquiry.equipment, 'quantity': inquiry.quantity,
                  'commodity': inquiry.commodity, 'weight_kg': inquiry.weight_kg}
-        row, reused = await booking_svc.create_booking(db, tenant_id, actor, inquiry.id,
-                                                       quote_id, cargo)
+        # `booking.create` is COMMITMENT, so approval is not optional: a booking is the one
+        # action here that cannot be undone by editing a row. "Approved" means the quote was
+        # actually sent -- a booking against an unsent quote is a commitment nobody promised.
+        row, reused = await harness.run(
+            'booking.create', agent=agent_for_node('booking'), db=db, tenant_id=tenant_id,
+            actor=actor, roles=roles, approved=bool(quote.sent_at),
+            detail={'quote_id': quote.id},
+            call=lambda: booking_svc.create_booking(db, tenant_id, actor, inquiry.id,
+                                                    quote.id, cargo))
         return {'steps': [_step('booking', detail=f'booking {row.status}'
                                 + (' (existing)' if reused else ''),
+                                action='booking.create',
                                 booking_id=row.id, provider_ref=row.provider_ref,
                                 reused=reused)]}
 
@@ -336,8 +329,12 @@ def build_pipeline_graph(*, db, tenant_id: str, actor: str, trace_id: str):
         vessel = state.get('vessel_name')
         if not vessel:
             return {'steps': [_step('vessel_tracking', 'skipped', 'no vessel supplied')]}
-        row = await vessel_svc.refresh_position(db, tenant_id, actor, vessel)
+        row = await harness.run(
+            'vessel.position.refresh', agent=agent_for_node('vessel_tracking'), db=db,
+            tenant_id=tenant_id, actor=actor, roles=roles, detail={'vessel': vessel},
+            call=lambda: vessel_svc.refresh_position(db, tenant_id, actor, vessel))
         return {'steps': [_step('vessel_tracking', detail='position refreshed',
+                                action='vessel.position.refresh',
                                 vessel=vessel, delay_hours=row.delay_hours)]}
 
     graph = StateGraph(PipelineState)
@@ -395,4 +392,12 @@ def build_pipeline_graph(*, db, tenant_id: str, actor: str, trace_id: str):
     graph.add_conditional_edges('booking', _next('vessel_tracking'),
                                 {'vessel_tracking': 'vessel_tracking', END: END})
     graph.add_edge('vessel_tracking', END)
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
+
+
+# A node with no owning agent would produce a trace step nobody is accountable for, and a
+# harness call with no identity to check against. Checked at import so a forgotten
+# registration is a collection error in the suite, not an `agent: unknown` in production logs.
+for _node in NODES:
+    agent_for_node(_node)
+

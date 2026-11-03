@@ -12,16 +12,25 @@
 └─────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 编排层                                                       │
-│   Orchestrator 状态机（services/orchestrator.py）             │
-│   10 个阶段串联，可逆步骤自动跑，遇闸门即停                     │
-│   长流程持久化，不阻塞等待；Worker + Webhook 恢复             │
+│ 编排层（LangGraph）                                           │
+│   StateGraph + 条件边 + 条件入口点 + 持久化 Checkpoint        │
+│   报价图 11 节点（app/graph/builder.py）                      │
+│   获客图 3 节点（app/graph/acquisition.py）                   │
+│   状态是游标+轨迹，业务状态仍只在领域表                       │
 └─────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ Agent 层（只做理解 / 决策 / 生成）                            │
-│   Prospecting    Enrichment    Cold Outreach                 │
-│   Inquiry/Clarify   RFQ/Quotation   Followup/Growth          │
+│ Agent 层（四个业务 Agent + 编排器）                           │
+│   acquisition 获客   sourcing 询价   quoting 报价             │
+│   tracking 跟踪      orchestrator 只路由、只读                │
+│   每个节点声明归属；trace 记录是谁在行动                       │
+└─────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────┐
+│ Harness 治理层（app/harness/）                                │
+│   风险分级 READ / DRAFT / EXTERNAL / COMMITMENT               │
+│   动作白名单 + Agent 归属 + 角色 + 审批前置                   │
+│   失败关闭：未声明的动作一律拒绝；拒绝也落审计                 │
 └─────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -97,6 +106,14 @@ RFQ、HITL、Booking、Tracking、船位延误均以 DB 状态为准，由 Worke
 | 无订舱不生成客户预警 | `services/vessel.py` | 返回 `alert: null` |
 | 编排不得越过审批闸门 | `services/orchestrator.py` | 停在 `hitl_review`，返回 `waiting_approval` |
 | 未审批时 continue 不生效 | `services/orchestrator.py` | 停在 `hitl_review`，返回 `waiting_approval` |
+| 未声明的动作一律拒绝 | `harness/guard.py` | `unknown_action` → `deny`（失败关闭，不默认放行） |
+| Agent 不得越界行动 | `harness/guard.py` | `agent_not_entitled`；orchestrator 仅 READ |
+| 审批不能修补角色缺失 | `harness/guard.py` | 角色检查排在审批之前，顺序可测 |
+| 承诺级动作不可免审批 | `harness/actions.py` | `approval_required` 由 `risk >= COMMITMENT` 强制 |
+| 被拒动作不触达服务 | `harness/guard.py` | `run()` 先决定再调用，拒绝时 callable 不被执行 |
+| 拒绝留有证据 | `harness/guard.py` | 拒绝路径单独 commit，回滚不抹掉审计 |
+| 每个节点有唯一归属者 | `agents/registry.py` | 导入时校验，未归属节点直接报错 |
+| 获客图不得发信 | `graph/acquisition.py` | 只产出候选，`qualify` 后即停机 |
 
 ## 数据源适配层
 

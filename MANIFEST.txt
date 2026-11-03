@@ -4,6 +4,7 @@
 ./.gitattributes
 ./.github/workflows/ci.yml
 ./.gitignore
+./.run_id
 ./CHANGELOG.md
 ./Dockerfile
 ./HOW_TO_RUN.txt
@@ -18,6 +19,7 @@
 ./app/agents/__init__.py
 ./app/agents/maf_workflows.py
 ./app/agents/prompts.py
+./app/agents/registry.py
 ./app/agents/resilience.py
 ./app/agents/runtime.py
 ./app/agents/specialists.py
@@ -28,8 +30,15 @@
 ./app/db.py
 ./app/enums.py
 ./app/graph/__init__.py
+./app/graph/acquisition.py
 ./app/graph/builder.py
+./app/graph/checkpoint.py
+./app/graph/nodes.py
 ./app/graph/runner.py
+./app/harness/__init__.py
+./app/harness/actions.py
+./app/harness/guard.py
+./app/harness/risk.py
 ./app/knowledge/__init__.py
 ./app/knowledge/chunking.py
 ./app/knowledge/corpus/amendment.md
@@ -99,6 +108,7 @@
 ./docs/DELIVERY_STEP1.md
 ./docs/GITHUB_LANDSCAPE.md
 ./docs/INTEGRATIONS.md
+./docs/ORCHESTRATION_UPGRADE.md
 ./docs/OUTREACH_COMPLIANCE.md
 ./docs/PRODUCTION_GAPS.md
 ./docs/REFERENCES.md
@@ -114,6 +124,7 @@
 ./migrations/versions/0001_initial.py
 ./migrations/versions/0002_knowledge_and_graph.py
 ./migrations/versions/0003_source_runs.py
+./migrations/versions/0004_graph_state.py
 ./observability/prometheus.yml
 ./openapi/freight_agent.openapi.json
 ./postman/Freight_Agent_v1.0.postman_collection.json
@@ -138,6 +149,8 @@
 ./scripts/seed_knowledge.py
 ./scripts/verify_package.py
 ./tests/conftest.py
+./tests/test_acquisition_graph.py
+./tests/test_agent_registry.py
 ./tests/test_agent_resilience.py
 ./tests/test_api_routes.py
 ./tests/test_architecture_asset.py
@@ -150,7 +163,9 @@
 ./tests/test_doc_claims.py
 ./tests/test_eval_harness.py
 ./tests/test_followup_compliance.py
+./tests/test_graph_checkpoint.py
 ./tests/test_graph_pipeline.py
+./tests/test_harness.py
 ./tests/test_inquiry_idempotency.py
 ./tests/test_knowledge.py
 ./tests/test_lead.py

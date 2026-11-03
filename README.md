@@ -56,9 +56,9 @@ curl -s localhost:8100/api/v1/graph/run -H 'content-type: application/json' \
 | 行为评测 | **6/6**，全部真实执行 | `python evaluation/run_eval.py` |
 | SOP 检索评测 | **hit@1 90.9% / hit@3 95.5% / 负例误答 0** | `python evaluation/knowledge_eval.py` |
 | 交付验收 | **44/44** | `python scripts/delivery_check.py` |
-| API 路由 | **59** | `GET /docs` |
+| API 路由 | **62** | `GET /docs` |
 | 度量口径 | `GET /api/v1/metrics/agent`（p50/p95、token、成本、闸门分布） | 见下方「可观测性」 |
-| 数据表 / 索引 | **24 / 43** | `alembic upgrade head` |
+| 数据表 / 索引 | **27 / 47** | `alembic upgrade head` |
 | 模块循环依赖 | **0** | `tests/test_architecture_asset.py` |
 
 > 上述数字都是本仓库当前代码实测所得，不是目标值。跑一遍即可复核。

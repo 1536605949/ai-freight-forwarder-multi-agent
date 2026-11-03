@@ -1,5 +1,65 @@
 # Changelog
 
+## 2.1.0-rc1 — Harness 治理层、Agent 身份、持久化 Checkpoint
+
+2.0 有了 LangGraph 条件路由和可恢复闸门，但「谁能做什么」只有一个 `read_only` 布尔：
+它分不清「写一条草稿」和「把价格发给客户」。这一版补的是**控制面**。
+
+详见 [`docs/ORCHESTRATION_UPGRADE.md`](docs/ORCHESTRATION_UPGRADE.md)（目标架构逐格对照 + 实测输出 + 刻意没做的事）。
+
+### 新增：Harness 治理层（`app/harness/`）
+
+- 四级有序风险量表 `READ / DRAFT / EXTERNAL / COMMITMENT`，按**业务后果**分，不按有没有网络请求分。
+- `ActionSpec` 动作表是唯一的副作用清单：归属 Agent、风险、是否需审批、需要什么角色。
+  **未声明的动作一律拒绝**——危险默认是 `allow`，这条断言就是防止它变成默认。
+- 判定顺序是契约：未声明 → 归属 → 角色 → 审批。角色排在审批之前，因为「你不是复核人」
+  不是审批能修的事；顺序错了，运维会去错的地方找原因。
+- `COMMITMENT` 不可配置跳过审批：`approval_required` 由 `risk >= COMMITMENT` 强制，
+  未来新增承诺级动作不会因为忘了写 `requires_approval=True` 而免审。
+- 拒绝**在服务调用之前**发生，且拒绝路径单独 `commit`：调用方一抛异常、事务一回滚，
+  最该被审计的那条记录不能跟着消失。
+- `GET /api/v1/harness/policy` 把整张表和四级量表暴露出来，评审可自查。
+
+### 新增：四个 Agent 作为身份（`app/agents/registry.py`）
+
+- 获客 / 询价 / 报价 / 跟踪各自声明拥有哪些图节点、风险上限多少；编排器只拥有 `READ`
+  ——能让人去查，不能让人去承诺。
+- 每个 step 记录 `agent`、`action`、`risk`，trace 从「哪个函数跑了」变成「谁在行动」。
+- 两个不变量由测试守：每个节点恰好一个归属者；每个 Agent 的风险上限覆盖它拥有的全部动作。
+
+### 新增：SQL 版 Checkpointer（`app/graph/checkpoint.py`，迁移 0004）
+
+- `SqlCheckpointSaver(BaseCheckpointSaver)`：每个 super-step 写一条状态快照，
+  与 `pipeline_graph_runs` 的一次性摘要互补——崩在中间时摘要没了、快照还在。
+- 异步方法全部内联，不用 `asyncio.to_thread`：那会把 SQLAlchemy `Session` 搬到别的线程。
+- `GET /api/v1/graph/runs/{run_id}/checkpoints` 返回逐节点时间线，按租户经 run 行隔离
+  （thread id 是内部标识，不能当能力用）。
+- 列名 `metadata_blob` 而非 `metadata`：后者是 SQLAlchemy 声明式基类的属性。
+
+### 新增：获客 Agent 进入编排（`app/graph/acquisition.py`）
+
+- `collect → score → qualify`，共用同一套 Harness 与 Checkpointer。
+- 单独一张图，因为获客发生在询价**之前**，而 `PipelineGraphRun.inquiry_id` 是非空外键。
+- **不发信**：只产出候选；发信是 `prospect.outreach.send`（`EXTERNAL` + 复核人 + 审批），
+  只能走服务层自己的四道闸门。
+- 无人可触达时停机于 `no_reachable_prospect` 并给出缺口分解
+  （`no_email` / `below_floor` / `suppressed`）：「找不到人」和「源坏了」必须长得不一样。
+- `POST /api/v1/graph/prospect`、`acquisition_runs` 表（迁移 0004）。
+
+### 修复
+
+- **请求体静默降级为查询参数**：`/api/v1/graph/prospect` 的 `AcquisitionRunIn` 没被 import，
+  而 `from __future__ import annotations` 让注解成了字符串，导入期不报错；FastAPI 解析不了，
+  把参数当成 `?x=...`，每个真实请求都返回 `422 {"loc":["query","x"]}`。
+  新增通用守卫：任何 POST 处理器签名里出现 Pydantic 模型，就必须发布 `requestBody`。
+- **`pending_writes` 必须是三元组**：返回 `(channel, value)` 类型检查过得去，
+  直到渲染历史才报 `not enough values to unpack`——那时运行早已被报告为成功。
+
+### 文档
+
+- 新增 `docs/ORCHESTRATION_UPGRADE.md`；`docs/ARCHITECTURE_LAYERS.md` 分层图加入 Harness 层与
+  LangGraph 编排层，硬门禁表增加 9 条。
+
 ## 2.0.0-rc1 — 从业务流水线到 Agent 系统
 
 1.0 是一个**有 Agent 角色的业务流程引擎**：状态机、确定性定价、审批闸门都在，但编排是固定

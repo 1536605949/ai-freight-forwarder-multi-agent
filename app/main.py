@@ -9,6 +9,7 @@ from app.db import engine,get_db
 from app.schema_guard import ensure_schema
 from app.auth import current_principal,Principal,require_role
 from app.schemas import (
+    AcquisitionRunIn,
     AgentAskIn, ApprovalIn, BookingCreate, CRMActivityCreate, FollowUpCreate, GraphResumeIn,
     GraphRunIn, InboundMessage, InquiryPatch, KnowledgeDocumentIn, KnowledgeQueryIn, LeadCreate,
     OptOutIn, OrchestrateContinueIn, OrchestrateIn, OutreachApproveIn, OutreachDraftIn,
@@ -34,7 +35,10 @@ from app.services import vessel as vessel_svc
 from app.services import orchestrator as orchestrator_svc
 from app.services.metrics import agent_metrics, graph_metrics
 from app.graph import latest_run as latest_graph_run
-from app.graph import resume_graph, run_graph
+from app.graph import resume_graph, run_acquisition, run_checkpoints, run_graph
+from app.agents.registry import agent_table
+from app.harness import Risk
+from app.harness import policy_table as harness_policy_table
 from app.knowledge import answer_question as knowledge_answer
 from app.knowledge import search_knowledge, seed_corpus
 from app.knowledge.service import ingest_document
@@ -340,7 +344,8 @@ async def graph_run(x:GraphRunIn,request:Request,db:Session=Depends(get_db),p:Pr
     try:
         run=await run_graph(db,p.tenant_id,p.user_id,request.state.trace_id,x.inquiry_id,
                             start_node=x.start_node,vessel_name=x.vessel_name,
-                            allow_synthetic_quotes=x.allow_synthetic_quotes)
+                            allow_synthetic_quotes=x.allow_synthetic_quotes,
+                            roles=tuple(p.roles))
         return run.as_dict()
     except KeyError:raise HTTPException(404,'not found')
     except ValueError as e:raise HTTPException(422,str(e))
@@ -350,7 +355,8 @@ async def graph_resume(x:GraphResumeIn,request:Request,db:Session=Depends(get_db
     """Resume a halted run. The node is derived from persisted state, not from the request."""
     try:
         return (await resume_graph(db,p.tenant_id,p.user_id,request.state.trace_id,x.inquiry_id,
-                                   vessel_name=x.vessel_name)).as_dict()
+                                   vessel_name=x.vessel_name,
+                                   roles=tuple(p.roles))).as_dict()
     except KeyError:raise HTTPException(404,'no run for this inquiry')
     except ValueError as e:raise HTTPException(409,str(e))
 
@@ -360,6 +366,35 @@ def graph_status(inquiry_id:str,db:Session=Depends(get_db),p:Principal=Depends(c
     if not row:raise HTTPException(404,'no run for this inquiry')
     return {'run_id':row.id,'status':row.status,'current_node':row.current_node,
             'pending_gate':row.pending_gate,'steps':row.steps}
+
+@app.get('/api/v1/graph/runs/{run_id}/checkpoints')
+def graph_checkpoints(run_id:str,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):
+    """The per-node state timeline for one run, oldest first.
+
+    This is what makes "recoverable" checkable rather than claimed: each entry is a real
+    LangGraph checkpoint written during execution, not a summary produced afterwards.
+    """
+    try:return {'run_id':run_id,'checkpoints':run_checkpoints(db,p.tenant_id,run_id)}
+    except KeyError:raise HTTPException(404,'run not found')
+
+@app.post('/api/v1/graph/prospect')
+async def graph_prospect(x:AcquisitionRunIn,request:Request,db:Session=Depends(get_db),p:Principal=Depends(current_principal)):
+    """Run the acquisition graph: collect, score, and decide who is reachable.
+
+    It stops there. Sending is a separate, approved action; this endpoint cannot contact
+    anyone, whatever the request body says.
+    """
+    try:
+        return await run_acquisition(db,p.tenant_id,p.user_id,request.state.trace_id,
+                                     sources=x.sources,lane=x.lane,
+                                     start_node=x.start_node,roles=tuple(p.roles))
+    except ValueError as e:raise HTTPException(422,str(e))
+
+@app.get('/api/v1/harness/policy')
+def harness_policy(p:Principal=Depends(current_principal)):
+    """The declared side-effect surface: who may do what, at what risk, with what approval."""
+    return {'agents':agent_table(),'actions':harness_policy_table(),
+            'risk_levels':[{'level':int(r),'label':r.label} for r in Risk]}
 
 # --- SOP knowledge base (RAG): cited answers, explicit refusal --------------------------
 @app.post('/api/v1/knowledge/documents')

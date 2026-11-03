@@ -199,6 +199,68 @@ def check_tenant_isolation(c: Client) -> bool:
     return True
 
 
+def check_governance(c: Client) -> bool:
+    """The control plane: policy table, a refusal, and a replayable timeline.
+
+    These are the three claims that separate an agent system from a demo, so they get checked
+    against the running server rather than asserted in a slide.
+    """
+    ok = True
+
+    r = c.get('/api/v1/harness/policy', H_SALES)
+    if r.status_code != 200:
+        return check('治理策略表可读', False, f'status={r.status_code}')
+    policy = r.json()
+    actions = {a['name']: a for a in policy.get('actions', [])}
+    ok &= check('治理策略表可读', bool(actions), f'{len(actions)} actions declared')
+    ok &= check('  风险分级为四级有序量表',
+                [lvl['label'] for lvl in policy.get('risk_levels', [])]
+                == ['只读', '内部草稿', '对外发送', '不可逆承诺'])
+    ok &= check('  发价需审批、订舱为承诺级',
+                (actions.get('quote.send') or {}).get('requires_approval') is True
+                and (actions.get('booking.create') or {}).get('risk') == 3)
+
+    # Drive the graph straight at the gate. The refusal must come from the harness, before
+    # the service is reached, and it must be visible in the trace.
+    inq = new_inquiry(c)
+    r = c.post('/api/v1/graph/run', H_SALES,
+               {'inquiry_id': inq, 'start_node': 'quote_send'})
+    body = r.json() if r.status_code == 200 else {}
+    steps = body.get('steps') or []
+    decision = ((steps[-1] if steps else {}).get('outputs') or {}).get('harness') or {}
+    ok &= check('绕过闸门直接发价被治理层拒绝',
+                body.get('status') == 'failed'
+                and decision.get('outcome') == 'needs_approval'
+                and decision.get('action') == 'quote.send',
+                f'status={body.get("status")}, decision={decision.get("outcome")}')
+
+    # A normal run, then read the per-node snapshots back.
+    inq2 = new_inquiry(c)
+    r = c.post('/api/v1/graph/run', H_SALES,
+               {'inquiry_id': inq2, 'allow_synthetic_quotes': True})
+    run = r.json() if r.status_code == 200 else {}
+    run_id = run.get('run_id')
+    if run_id:
+        r = c.get(f'/api/v1/graph/runs/{run_id}/checkpoints', H_SALES)
+        snapshots = (r.json() if r.status_code == 200 else {}).get('checkpoints') or []
+        ok &= check('每个节点都有状态快照（可回放）',
+                    len(snapshots) >= len(run.get('steps') or []) > 0,
+                    f'{len(snapshots)} snapshots / {len(run.get("steps") or [])} steps')
+        ok &= check('  轨迹记录了执行 Agent',
+                    all(s.get('agent') for s in (run.get('steps') or [])))
+    else:
+        ok &= check('每个节点都有状态快照（可回放）', False, f'no run_id, http={r.status_code}')
+
+    # The acquisition graph must stop and explain, not return a silent zero.
+    r = c.post('/api/v1/graph/prospect', H_SALES, {'sources': ''})
+    acq = r.json() if r.status_code == 200 else {}
+    ok &= check('获客图停机时给出原因',
+                acq.get('status') == 'no_source_configured'
+                and acq.get('stop_reason') == 'no_source_configured',
+                f'status={acq.get("status")}')
+    return ok
+
+
 def check_observability(c: Client) -> bool:
     print('\n[8] 可观测性')
     r = requests.get(f'{c.base}/metrics', timeout=30)
@@ -296,6 +358,7 @@ def main() -> int:
 
         check_rates(c)
         check_outreach_compliance(c)
+        check_governance(c)
         check_tenant_isolation(c)
         check_observability(c)
     except requests.RequestException as exc:

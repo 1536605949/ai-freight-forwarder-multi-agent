@@ -348,3 +348,48 @@ def test_knowledge_documents_is_tenant_scoped(client, api_db):
     r = client.get('/api/v1/knowledge/documents', headers=_headers())
 
     assert r.json()['count'] == 0
+
+
+# --------------------------------------------------------------------------- #
+# A body parameter that silently becomes a query parameter
+# --------------------------------------------------------------------------- #
+
+def test_every_post_route_that_takes_a_model_declares_a_request_body():
+    """An unresolved annotation degrades a JSON body into a required query parameter.
+
+    Found by driving the real server, not by the suite: `/api/v1/graph/prospect` took
+    `x: AcquisitionRunIn` while `AcquisitionRunIn` was missing from `app/main.py`'s import
+    list. Because `from __future__ import annotations` turns the annotation into a string,
+    nothing failed at import; FastAPI simply could not resolve it and treated the parameter
+    as `?x=...`, so every real request came back
+    `422 {"loc": ["query", "x"], "msg": "Field required"}`.
+
+    The check is generic on purpose: any POST handler whose signature names a Pydantic model
+    must publish a `requestBody`, whatever the endpoint is called.
+    """
+    from typing import get_type_hints
+
+    from fastapi.routing import APIRoute
+    from pydantic import BaseModel
+
+    from app.main import app as fastapi_app
+
+    spec = fastapi_app.openapi()
+    problems: list[str] = []
+    for route in fastapi_app.routes:
+        if not isinstance(route, APIRoute) or 'POST' not in route.methods:
+            continue
+        hints = get_type_hints(route.endpoint)
+        takes_model = any(
+            isinstance(hint, type) and issubclass(hint, BaseModel) for hint in hints.values()
+        )
+        if not takes_model:
+            continue
+        operation = spec['paths'].get(route.path, {}).get('post', {})
+        if 'requestBody' not in operation:
+            problems.append(f'{route.path} ({route.endpoint.__name__})')
+
+    assert not problems, (
+        'POST handler(s) take a Pydantic model but publish no requestBody, which means the '
+        f'model annotation did not resolve: {problems}'
+    )

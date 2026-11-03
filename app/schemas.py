@@ -110,6 +110,17 @@ class GraphRunIn(BaseModel):
     # Demo only. Ignored in production -- see graph/runner._effective_demo_shortcuts.
     allow_synthetic_quotes:bool|None=None
 
+class AcquisitionRunIn(BaseModel):
+    """Run the pre-inquiry acquisition graph.
+
+    `sources` uses the same `kind|name|url[|lane]` format as `PROSPECTING_SOURCES`; leaving it
+    out falls back to the configured value rather than to "collect from anywhere", so a
+    caller cannot widen the collection surface by omitting a field.
+    """
+    sources:str|None=None
+    lane:str|None=None
+    start_node:Literal['collect','score','qualify']='collect'
+
 class GraphResumeIn(BaseModel):
     """Re-enter a halted graph run at the node it stopped at.
 

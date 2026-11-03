@@ -285,6 +285,73 @@ class PipelineGraphRun(Base):
     created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True), default=now)
     updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
+class AcquisitionRun(Base):
+    """A run of the pre-inquiry acquisition graph.
+
+    Not a `PipelineGraphRun`: that row requires an inquiry id, and 获客 happens *before* an
+    inquiry exists. Making the column nullable would have meant every existing query had to
+    start handling a null it never had before, to model a flow that genuinely has no subject.
+    A separate table is the cheaper truth.
+
+    `thread_id` is the join key to `graph_checkpoints`, so a run's per-node snapshots are
+    reachable from here without duplicating them.
+    """
+    __tablename__='acquisition_runs'
+    id:Mapped[str]=mapped_column(String(64), primary_key=True)
+    tenant_id:Mapped[str]=mapped_column(String(64), index=True)
+    thread_id:Mapped[str]=mapped_column(String(64), index=True)
+    status:Mapped[str]=mapped_column(String(40), default='running')
+    stop_reason:Mapped[str|None]=mapped_column(String(120), nullable=True)
+    fetched:Mapped[int]=mapped_column(Integer, default=0)
+    accepted:Mapped[int]=mapped_column(Integer, default=0)
+    scored:Mapped[int]=mapped_column(Integer, default=0)
+    reachable:Mapped[int]=mapped_column(Integer, default=0)
+    steps:Mapped[list]=mapped_column(JSON, default=list)
+    state:Mapped[dict]=mapped_column(JSON, default=dict)
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True), default=now)
+
+class GraphCheckpoint(Base):
+    """One LangGraph checkpoint: the full channel state after a super-step.
+
+    Deliberately a separate table from `pipeline_graph_runs`. The run row is a *summary*
+    written once, after the graph returns; this table is written by the graph *during*
+    execution, once per node. Keeping them apart means a run that crashed mid-graph still
+    has checkpoints (the summary never got written), and a run row can be pruned without
+    losing the ability to replay.
+
+    `metadata_blob` is not called `metadata`: that name is taken by SQLAlchemy's declarative
+    `Base.metadata`, and shadowing it breaks the whole mapper.
+    """
+    __tablename__='graph_checkpoints'
+    thread_id:Mapped[str]=mapped_column(String(64), primary_key=True)
+    checkpoint_ns:Mapped[str]=mapped_column(String(120), primary_key=True, default='')
+    checkpoint_id:Mapped[str]=mapped_column(String(64), primary_key=True)
+    parent_checkpoint_id:Mapped[str|None]=mapped_column(String(64), nullable=True)
+    tenant_id:Mapped[str|None]=mapped_column(String(64), nullable=True, index=True)
+    run_id:Mapped[str|None]=mapped_column(String(64), nullable=True, index=True)
+    checkpoint_type:Mapped[str]=mapped_column(String(40), default='msgpack')
+    checkpoint_blob:Mapped[str]=mapped_column(Text)
+    metadata_type:Mapped[str]=mapped_column(String(40), default='msgpack')
+    metadata_blob:Mapped[str]=mapped_column(Text)
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True), default=now)
+
+class GraphCheckpointWrite(Base):
+    """Pending task writes, as LangGraph's checkpointer protocol requires.
+
+    LangGraph calls `put_writes` for every node's channel writes. Storing them is what makes
+    a checkpoint self-contained: a replay needs the writes that produced the next state, not
+    only the state itself.
+    """
+    __tablename__='graph_checkpoint_writes'
+    thread_id:Mapped[str]=mapped_column(String(64), primary_key=True)
+    checkpoint_ns:Mapped[str]=mapped_column(String(120), primary_key=True, default='')
+    checkpoint_id:Mapped[str]=mapped_column(String(64), primary_key=True)
+    task_id:Mapped[str]=mapped_column(String(64), primary_key=True)
+    idx:Mapped[int]=mapped_column(Integer, primary_key=True)
+    channel:Mapped[str]=mapped_column(String(120))
+    value_type:Mapped[str]=mapped_column(String(40), default='msgpack')
+    value_blob:Mapped[str]=mapped_column(Text)
+
 class AuditEvent(Base):
     __tablename__='audit_events'
     id:Mapped[str]=mapped_column(String(64), primary_key=True); tenant_id:Mapped[str]=mapped_column(String(64), index=True)
