@@ -24,10 +24,10 @@ python scripts/bootstrap_dev.py          # 建 venv + 装依赖 + alembic upgrad
 python -m uvicorn app.main:app --port 8100
 
 # 另开一个终端：
-pytest -q                                # 单元 + 集成：351 passed
+pytest -q                                # 单元 + 集成：389 passed
 python evaluation/run_eval.py            # 行为评测：6/6 通过
 python evaluation/knowledge_eval.py      # 检索评测：hit@3 95.5%，负例误答 0/12
-python scripts/delivery_check.py         # 交付验收：44/44 通过
+python scripts/delivery_check.py         # 交付验收：51/51 通过
 sha256sum -c SHA256SUMS.txt              # 完整性校验：全部 OK
 ```
 
@@ -50,12 +50,12 @@ curl -s localhost:8100/api/v1/graph/run -H 'content-type: application/json' \
 
 | 项目 | 结果 | 复现命令 |
 |---|---|---|
-| 单元 / 集成测试 | **351 passed** | `pytest -q` |
+| 单元 / 集成测试 | **389 passed** | `pytest -q` |
 | 覆盖率 | **82%** 整体；v2.0 新增模块 **88%** | `pytest --cov=app --cov=worker --cov=evaluation` |
 | 静态检查 | **ruff 全绿**（规则集见 `pyproject.toml`） | `ruff check app tests worker evaluation scripts` |
 | 行为评测 | **6/6**，全部真实执行 | `python evaluation/run_eval.py` |
 | SOP 检索评测 | **hit@1 90.9% / hit@3 95.5% / 负例误答 0** | `python evaluation/knowledge_eval.py` |
-| 交付验收 | **44/44** | `python scripts/delivery_check.py` |
+| 交付验收 | **51/51** | `python scripts/delivery_check.py` |
 | API 路由 | **62** | `GET /docs` |
 | 度量口径 | `GET /api/v1/metrics/agent`（p50/p95、token、成本、闸门分布） | 见下方「可观测性」 |
 | 数据表 / 索引 | **27 / 47** | `alembic upgrade head` |

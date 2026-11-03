@@ -15,6 +15,9 @@ would, and asserts the *business* properties that make this system worth buying:
   6. Cold outreach is blocked without a lawful basis.
   7. Tenants cannot see each other's data.
   8. Rates carry provenance and validity.
+  9. The control plane holds: the policy table is readable, driving the graph straight at
+     the gate is refused *by the harness* (not by luck of ordering), and every node left a
+     replayable state snapshot.
 
 Every check is reported with PASS/FAIL and a one-line reason, and the script exits
 non-zero if anything fails so it can gate a release.
@@ -220,21 +223,10 @@ def check_governance(c: Client) -> bool:
                 (actions.get('quote.send') or {}).get('requires_approval') is True
                 and (actions.get('booking.create') or {}).get('risk') == 3)
 
-    # Drive the graph straight at the gate. The refusal must come from the harness, before
-    # the service is reached, and it must be visible in the trace.
-    inq = new_inquiry(c)
-    r = c.post('/api/v1/graph/run', H_SALES,
-               {'inquiry_id': inq, 'start_node': 'quote_send'})
-    body = r.json() if r.status_code == 200 else {}
-    steps = body.get('steps') or []
-    decision = ((steps[-1] if steps else {}).get('outputs') or {}).get('harness') or {}
-    ok &= check('绕过闸门直接发价被治理层拒绝',
-                body.get('status') == 'failed'
-                and decision.get('outcome') == 'needs_approval'
-                and decision.get('action') == 'quote.send',
-                f'status={body.get("status")}, decision={decision.get("outcome")}')
-
-    # A normal run, then read the per-node snapshots back.
+    # A normal run first, so a quote exists and is waiting for approval -- then drive the
+    # graph straight at `quote_send`. On an inquiry with no quote at all the node refuses
+    # with `quote_missing` before the harness is reached, which is a correct answer to a
+    # different question and would make this check pass for the wrong reason.
     inq2 = new_inquiry(c)
     r = c.post('/api/v1/graph/run', H_SALES,
                {'inquiry_id': inq2, 'allow_synthetic_quotes': True})
@@ -250,6 +242,18 @@ def check_governance(c: Client) -> bool:
                     all(s.get('agent') for s in (run.get('steps') or [])))
     else:
         ok &= check('每个节点都有状态快照（可回放）', False, f'no run_id, http={r.status_code}')
+
+    r = c.post('/api/v1/graph/run', H_SALES,
+               {'inquiry_id': inq2, 'start_node': 'quote_send'})
+    body = r.json() if r.status_code == 200 else {}
+    steps = body.get('steps') or []
+    decision = ((steps[-1] if steps else {}).get('outputs') or {}).get('harness') or {}
+    ok &= check('绕过闸门直接发价被治理层拒绝',
+                body.get('status') == 'failed'
+                and decision.get('outcome') == 'needs_approval'
+                and decision.get('action') == 'quote.send',
+                f'status={body.get("status")}, decision={decision.get("outcome")}, '
+                f'reason={body.get("stop_reason")}')
 
     # The acquisition graph must stop and explain, not return a silent zero.
     r = c.post('/api/v1/graph/prospect', H_SALES, {'sources': ''})
