@@ -536,10 +536,10 @@ export OPENAI_CHAT_MODEL=...
 
 ```
 app/
-  main.py            59 条路由；鉴权、错误码映射、demo 页面挂载
+  main.py            62 条路由；鉴权、错误码映射、demo 页面挂载
   state_machine.py   InquiryStatus 迁移图 + advance_status()（唯一真相来源）
   enums.py           状态词汇表
-  models.py          23 张表（全部带 tenant_id）
+  models.py          27 张表（全部带 tenant_id）
   schemas.py         Pydantic 输入契约
   config.py          58 个配置项（与 .env.example 逐项对齐，有测试守）
   auth.py            dev 头 / JWT 双模式 + require_role()
